@@ -9,6 +9,7 @@ import (
 
 	"github.com/congqixia/birdwatcher/proto/v2.0/commonpb"
 	"github.com/congqixia/birdwatcher/proto/v2.0/datapb"
+	"github.com/congqixia/birdwatcher/proto/v2.0/querypb"
 	"github.com/congqixia/birdwatcher/storage"
 	"github.com/golang/protobuf/proto"
 	"github.com/spf13/cobra"
@@ -77,6 +78,54 @@ func getEtcdShowSegments(cli *clientv3.Client, basePath string) *cobra.Command {
 	return cmd
 }
 
+func getLoadedSegmentsCmd(cli *clientv3.Client, basePath string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "segment-loaded",
+		Short:   "display segment information from querycoord",
+		Aliases: []string{"segments-loaded"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+
+			collID, err := cmd.Flags().GetInt64("collection")
+			if err != nil {
+				return err
+			}
+			segmentID, err := cmd.Flags().GetInt64("segment")
+			if err != nil {
+				return err
+			}
+			/*
+				format, err := cmd.Flags().GetString("format")
+				if err != nil {
+					return err
+				}
+				detail, err := cmd.Flags().GetBool("detail")
+				if err != nil {
+					return err
+				}*/
+
+			segments, err := listLoadedSegments(cli, basePath, func(info *querypb.SegmentInfo) bool {
+				return (collID == 0 || info.CollectionID == collID) &&
+					(segmentID == 0 || info.SegmentID == segmentID)
+			})
+			if err != nil {
+				fmt.Println("failed to list segments", err.Error())
+				return nil
+			}
+
+			for _, info := range segments {
+				fmt.Printf("Segment ID: %d LegacyNodeID: %d NodeIds: %v,DmlChannel: %s\n", info.SegmentID, info.NodeID, info.NodeIds, info.DmChannel)
+			}
+
+			return nil
+		},
+	}
+	cmd.Flags().Int64("collection", 0, "collection id to filter with")
+	cmd.Flags().String("format", "line", "segment display format")
+	cmd.Flags().Bool("detail", false, "flags indicating whether pring detail binlog info")
+	cmd.Flags().Int64("segment", 0, "segment id to filter with")
+	return cmd
+}
+
 func listSegments(cli *clientv3.Client, basePath string, filter func(*datapb.SegmentInfo) bool) ([]*datapb.SegmentInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
@@ -96,6 +145,28 @@ func listSegments(cli *clientv3.Client, basePath string, filter func(*datapb.Seg
 		}
 	}
 	return segments, nil
+}
+
+func listLoadedSegments(cli *clientv3.Client, basePath string, filter func(*querypb.SegmentInfo) bool) ([]*querypb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
+	resp, err := cli.Get(ctx, path.Join(basePath, "queryCoord-segmentMeta"), clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+	segments := make([]*querypb.SegmentInfo, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		info := &querypb.SegmentInfo{}
+		err = proto.Unmarshal(kv.Value, info)
+		if err != nil {
+			continue
+		}
+		if filter == nil || filter(info) {
+			segments = append(segments, info)
+		}
+	}
+	return segments, nil
+
 }
 
 const (

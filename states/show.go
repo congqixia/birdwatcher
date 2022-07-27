@@ -17,6 +17,7 @@ func getEtcdShowCmd(cli *clientv3.Client, basePath string) *cobra.Command {
 		getEtcdShowCollection(cli, basePath),
 		getEtcdShowSession(cli, basePath),
 		getEtcdShowSegments(cli, basePath),
+		getLoadedSegmentsCmd(cli, basePath),
 		getEtcdShowReplica(cli, basePath),
 	)
 	return showCmd
