@@ -38,6 +38,14 @@ func readInsertEventData(buffer io.Reader) (insertEventData, error) {
 	return data, nil
 }
 
+func readIndexFileEventData(buffer io.Reader) (indexFileEventData, error) {
+	data := indexFileEventData{}
+	if err := binary.Read(buffer, commonEndian, &data); err != nil {
+		return data, err
+	}
+	return data, nil
+}
+
 func newEventReader() *EventReader {
 	return &EventReader{}
 }

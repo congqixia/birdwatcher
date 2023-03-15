@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/apache/arrow/go/v8/parquet"
 	"github.com/apache/arrow/go/v8/parquet/file"
 	"github.com/milvus-io/birdwatcher/proto/v2.0/schemapb"
+	"github.com/samber/lo"
 )
 
 type ParquetPayloadReader struct {
@@ -48,4 +50,25 @@ func (r *ParquetPayloadReader) GetInt64sFromPayload() ([]int64, error) {
 		return nil, errors.New("numRows not match")
 	}
 	return values, nil
+}
+
+func (r *ParquetPayloadReader) GetBytesFromPayload() ([][]byte, error) {
+	reader, ok := r.reader.RowGroup(0).Column(0).(*file.ByteArrayColumnChunkReader)
+	if !ok {
+		return nil, errors.New("parquet reader type not match")
+	}
+
+	numRows := r.reader.NumRows()
+	values := make([]parquet.ByteArray, numRows)
+	total, valuesRead, err := reader.ReadBatch(numRows, values, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if total != numRows || valuesRead != int(numRows) {
+		return nil, errors.New("numRows not match")
+	}
+
+	return lo.Map(values, func(ba parquet.ByteArray, _ int) []byte {
+		return []byte(ba.String())
+	}), nil
 }
