@@ -33,7 +33,7 @@ func GetParseIndexParamCmd() *cobra.Command {
 			json.Unmarshal(evt.ExtraBytes, &extra)
 
 			if extra["key"].(string) != "indexParams" {
-				fmt.Println("index data file found", evt.ExtraBytes)
+				fmt.Println("index data file found", extra)
 				return
 			}
 			data, err := r.NextEventReader(f, evt.PayloadDataType)
