@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/milvus-io/birdwatcher/proto/v2.0/schemapb"
+	"github.com/samber/lo"
 )
 
 type IndexReader struct {
@@ -42,10 +44,6 @@ func (reader *IndexReader) NextEventReader(f *os.File, dataType schemapb.DataTyp
 	}
 	fmt.Println(ifed)
 
-	switch dataType {
-	case schemapb.DataType_String:
-
-	}
 	next := header.EventLength - header.GetMemoryUsageInBytes() - ifed.GetEventDataFixPartSize()
 	data := make([]byte, next)
 	io.ReadFull(f, data)
@@ -55,14 +53,26 @@ func (reader *IndexReader) NextEventReader(f *os.File, dataType schemapb.DataTyp
 		fmt.Println(err.Error())
 		return nil, err
 	}
+	switch dataType {
+	case schemapb.DataType_String:
+		result, err := pr.GetStringFromPayload()
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil, err
+		}
+		return lo.Map(result, func(data string, _ int) []byte {
+			return []byte(data)
+		}), nil
+	case schemapb.DataType_Int8:
+		result, err := pr.GetBytesFromPayload()
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil, err
+		}
+		return [][]byte{result}, nil
 
-	result, err := pr.GetBytesFromPayload()
-	if err != nil {
-		fmt.Println(err.Error())
-		return nil, err
 	}
-
-	return result, nil
+	return nil, errors.New("unexpected data type")
 }
 
 /*
