@@ -1,7 +1,6 @@
 package states
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -124,9 +123,12 @@ func tryParseSliceMeta(file string) (string, int, error) {
 		fmt.Println(err.Error())
 		return "", 0, err
 	}
+	if len(data) != 1 {
+
+	}
 	meta := &SliceMeta{}
-	raw := bytes.TrimSpace(data[0])
-	err = json.Unmarshal(raw, meta)
+	//	raw := bytes.TrimSpace(data[0])
+	err = json.Unmarshal([]byte(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`), meta)
 	if err != nil {
 		fmt.Println("failed to unmarsahl", err.Error())
 		return "", 0, err
