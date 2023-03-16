@@ -31,8 +31,8 @@ func GetParseIndexParamCmd() *cobra.Command {
 			}
 			extra := make(map[string]any)
 			json.Unmarshal(evt.ExtraBytes, &extra)
-
-			if extra["key"].(string) != "indexParams" {
+			key := extra["key"].(string)
+			if key != "indexParams" && key == "SLICE_META" {
 				fmt.Println("index data file found", extra)
 				return
 			}
@@ -47,10 +47,24 @@ func GetParseIndexParamCmd() *cobra.Command {
 				return
 			}
 
-			params := make(map[string]string)
-			json.Unmarshal(data[0], &params)
-			fmt.Println(params)
+			switch key {
+			case "indexParams":
+				params := make(map[string]string)
+				json.Unmarshal(data[0], &params)
+				fmt.Println(params)
+			case "SLICE_META":
+				fmt.Println(string(data[0]))
+
+			}
+
 		},
+	}
+	return cmd
+}
+
+func GetOrganizeIndexFilesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "organize-indexfiles",
 	}
 	return cmd
 }
