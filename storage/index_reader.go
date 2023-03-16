@@ -37,12 +37,10 @@ func (reader *IndexReader) NextEventReader(f *os.File, dataType schemapb.DataTyp
 		//return nil, err
 		return nil, err
 	}
-	fmt.Println(header)
 	ifed, err := readIndexFileEventData(f)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(ifed)
 
 	next := header.EventLength - header.GetMemoryUsageInBytes() - ifed.GetEventDataFixPartSize()
 	data := make([]byte, next)
