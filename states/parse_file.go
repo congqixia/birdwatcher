@@ -71,7 +71,7 @@ func GetParseIndexParamCmd() *cobra.Command {
 
 func GetOrganizeIndexFilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "organize-indexfiles",
+		Use: "organize-indexfiles [file]",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("should provide only one file path")
@@ -182,7 +182,7 @@ func tryParseSliceMeta(file string) (string, int, error) {
 		return "", 0, errors.Newf("slice_meta item is not 1 but %d", len(meta.Meta))
 	}
 
-	fmt.Printf("SLICE_META total_num parsed:", meta.Meta[0].TotalLength)
+	fmt.Printf("SLICE_META total_num parsed: %d\n", meta.Meta[0].TotalLength)
 	return meta.Meta[0].Name, meta.Meta[0].SliceNum, nil
 }
 
