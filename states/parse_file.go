@@ -128,7 +128,7 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 
 			for i := 0; i < num; i++ {
 				key := fmt.Sprintf("%s_%d", prefix, i)
-				fmt.Println("processing file:", key)
+				fmt.Print("processing file:", key)
 				data, err := readIndexFile(path.Join(folder, key), func(metaKey string) bool {
 					return metaKey == key
 				})
@@ -136,6 +136,7 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 					fmt.Println(err.Error())
 					return
 				}
+				fmt.Println(" read data size:", len(data), hrSize(int64(len(data))))
 
 				_, err = output.Write(data)
 				if err != nil {
@@ -150,6 +151,17 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 	return cmd
 }
 
+func hrSize(size int64) string {
+	sf := float64(size)
+	units := []string{"Bytes", "KB", "MB", "GB"}
+	idx := 0
+	for sf > 1024.0 && idx < 3 {
+		sf /= 1024.0
+		idx++
+	}
+	return fmt.Sprintf("%f %s", sf, units[idx])
+}
+
 func tryParseSliceMeta(file string) (string, int, error) {
 	data, err := readIndexFile(file, func(key string) bool {
 		if key != "SLICE_META" {
@@ -162,7 +174,7 @@ func tryParseSliceMeta(file string) (string, int, error) {
 	raw := bytes.Trim(data, "\x00")
 	err = json.Unmarshal(raw, meta)
 	if err != nil {
-		fmt.Println("failed to unmarsahl", err.Error())
+		fmt.Println("failed to unmarshal", err.Error())
 		return "", 0, err
 	}
 
@@ -170,7 +182,7 @@ func tryParseSliceMeta(file string) (string, int, error) {
 		return "", 0, errors.Newf("slice_meta item is not 1 but %d", len(meta.Meta))
 	}
 
-	fmt.Println("total_num", meta.Meta[0].TotalLength)
+	fmt.Printf("SLICE_META total_num parsed:", meta.Meta[0].TotalLength)
 	return meta.Meta[0].Name, meta.Meta[0].SliceNum, nil
 }
 
