@@ -55,6 +55,8 @@ func GetParseIndexParamCmd() *cobra.Command {
 				json.Unmarshal(data[0], &params)
 				fmt.Println(params)
 			case "SLICE_META":
+				fmt.Println(len(data))
+				fmt.Println(len(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`))
 				fmt.Println(string(data[0]))
 			}
 
