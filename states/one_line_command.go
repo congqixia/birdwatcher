@@ -86,10 +86,10 @@ func readInstance(fp string) ([]InstanceInfo, error) {
 	for scanner.Scan() {
 		raw := scanner.Text()
 		parts := strings.Split(raw, "/")
-		if len(parts) == 2 {
+		if len(parts) == 3 {
 			result = append(result, InstanceInfo{
-				Addr:     parts[0],
-				RootPath: parts[1],
+				Addr:     parts[1],
+				RootPath: parts[2],
 			})
 		}
 	}
