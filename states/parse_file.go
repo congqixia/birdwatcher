@@ -126,6 +126,7 @@ func tryParseSliceMeta(file string) (string, int, error) {
 	meta := &SliceMeta{}
 	err = json.Unmarshal(data[0], meta)
 	if err != nil {
+		fmt.Println("failed to unmarsahl", err.Error())
 		return "", 0, err
 	}
 
