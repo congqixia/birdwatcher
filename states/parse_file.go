@@ -117,15 +117,18 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 				return
 			}
 
-			output, err := os.OpenFile(fmt.Sprintf("%s_%s", prefix, time.Now().Format("060102150406")), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			outputPath := fmt.Sprintf("%s_%s", prefix, time.Now().Format("060102150406"))
+			output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				fmt.Println(err.Error())
 				return
 			}
 			defer output.Close()
+			totalLen := int64(0)
 
 			for i := 0; i < num; i++ {
 				key := fmt.Sprintf("%s_%d", prefix, i)
+				fmt.Println("processing file:", key)
 				data, err := readIndexFile(path.Join(folder, key), func(metaKey string) bool {
 					return metaKey == key
 				})
@@ -134,8 +137,14 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 					return
 				}
 
-				output.Write(data)
+				_, err = output.Write(data)
+				if err != nil {
+					fmt.Println(err.Error())
+					return
+				}
+				totalLen += int64(len(data))
 			}
+			fmt.Printf("index file write to %s success, total len %d\n", outputPath, totalLen)
 		},
 	}
 	return cmd
