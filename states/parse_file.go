@@ -32,7 +32,7 @@ func GetParseIndexParamCmd() *cobra.Command {
 			extra := make(map[string]any)
 			json.Unmarshal(evt.ExtraBytes, &extra)
 			key := extra["key"].(string)
-			if key != "indexParams" && key == "SLICE_META" {
+			if key != "indexParams" && key != "SLICE_META" {
 				fmt.Println("index data file found", extra)
 				return
 			}
