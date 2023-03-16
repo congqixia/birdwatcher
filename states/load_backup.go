@@ -183,3 +183,15 @@ func testFile(file string) error {
 	}
 	return nil
 }
+
+func testFolder(folder string) error {
+	fi, err := os.Stat(folder)
+	if err != nil {
+		return err
+	}
+
+	if !fi.IsDir() {
+		return errors.Newf("path is not dir %s", folder)
+	}
+	return nil
+}

@@ -45,6 +45,7 @@ func Start() State {
 		getPulsarctlCmd(state),
 		//
 		GetParseIndexParamCmd(),
+		GetOrganizeIndexFilesCmd(),
 		// exit
 		getExitCmd(state))
 
