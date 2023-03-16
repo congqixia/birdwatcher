@@ -17,10 +17,17 @@ import (
 
 var (
 	simple = flag.Bool("simple", false, "use simple ui without suggestion and history")
+	olc    = flag.Bool("olc", false, "use one line command mode")
+	olcCmd = flag.String("olcCmd", "", "one line command cmd")
 	logger *log.Logger
 )
 
 func main() {
+	flag.Parse()
+	if *olc {
+		states.ExecOLC(*olcCmd)
+		return
+	}
 	defer handleExit()
 	app := states.Start()
 	// open file and create if non-existent

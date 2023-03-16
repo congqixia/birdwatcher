@@ -48,87 +48,95 @@ func getProbeQueryCmd(cli clientv3.KV, basePath string) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			loaded, err := common.ListCollectionLoadedInfo(ctx, cli, basePath, models.GTEVersion2_2)
-			if err != nil {
-				fmt.Println("failed to list loaded collection", err.Error())
-				return
-			}
-
-			if len(loaded) == 0 {
-				fmt.Println("no loaded collection")
-				return
-			}
-
-			sessions, err := common.ListSessions(cli, basePath)
-			if err != nil {
-				fmt.Println("failed to list online sessions", err.Error())
-				return
-			}
-
-			qc, err := getQueryCoordClient(sessions)
-			if err != nil {
-				fmt.Println("failed to connect querycoord", err.Error())
-				return
-			}
-
-			qns, err := getQueryNodeClients(sessions)
-			if err != nil {
-				fmt.Println("failed to connect querynodes", err.Error())
-				return
-			}
-			if len(qns) == 0 {
-				fmt.Println("no querynode online")
-				return
-			}
-
-			for _, collection := range loaded {
-				fmt.Println("probing collection", collection.CollectionID)
-				req, err := getMockSearchRequest(ctx, cli, basePath, collection)
-				if err != nil {
-					fmt.Println("failed to generated mock request", err.Error())
-					continue
-				}
-
-				leaders, err := qc.GetShardLeaders(ctx, &querypbv2.GetShardLeadersRequest{
-					Base:         &commonpbv2.MsgBase{},
-					CollectionID: collection.CollectionID,
-				})
-				if err != nil {
-					fmt.Println("querycoord get shard leaders error", err.Error())
-					continue
-				}
-
-				for _, shard := range leaders.GetShards() {
-
-					for _, nodeID := range shard.GetNodeIds() {
-						qn, ok := qns[nodeID]
-						if !ok {
-							fmt.Printf("Shard leader %d not online\n", nodeID)
-							continue
-						}
-
-						ctx, cancel := context.WithTimeout(ctx, time.Second*5)
-						req.DmlChannels = []string{shard.GetChannelName()}
-						req.Req.Base.TargetID = nodeID
-						resp, err := qn.Search(ctx, req)
-						cancel()
-						if err != nil {
-							fmt.Printf("Shard %s Leader[%d] failed to search with eventually consistency level, err: %s\n", shard.GetChannelName(), nodeID, err.Error())
-							continue
-						}
-						if resp.GetStatus().GetErrorCode() != commonpbv2.ErrorCode_Success {
-							fmt.Printf("Shard %s Leader[%d] failed to search,error code: %s reason:%s\n", shard.GetChannelName(), nodeID, resp.GetStatus().GetErrorCode().String(), resp.GetStatus().GetReason())
-							continue
-						}
-						fmt.Printf("Shard %s leader[%d] probe with search success.\n", shard.GetChannelName(), nodeID)
-					}
-				}
-			}
-
+			probeQuery(ctx, cli, basePath, func() {})
 		},
 	}
 
+	cmd.Flags().Int64("collection", 0, "collection id to probe")
+	cmd.Flags().Int64("segment", 0, "segment id to probe")
 	return cmd
+}
+
+func probeQuery(ctx context.Context, cli clientv3.KV, basePath string, afterFail func()) {
+	loaded, err := common.ListCollectionLoadedInfo(ctx, cli, basePath, models.GTEVersion2_2)
+	if err != nil {
+		fmt.Println("failed to list loaded collection", err.Error())
+		return
+	}
+
+	if len(loaded) == 0 {
+		fmt.Println("no loaded collection")
+		return
+	}
+
+	sessions, err := common.ListSessions(cli, basePath)
+	if err != nil {
+		fmt.Println("failed to list online sessions", err.Error())
+		return
+	}
+
+	qc, err := getQueryCoordClient(sessions)
+	if err != nil {
+		fmt.Println("failed to connect querycoord", err.Error())
+		return
+	}
+
+	qns, err := getQueryNodeClients(sessions)
+	if err != nil {
+		fmt.Println("failed to connect querynodes", err.Error())
+		return
+	}
+	if len(qns) == 0 {
+		fmt.Println("no querynode online")
+		return
+	}
+
+	for _, collection := range loaded {
+		fmt.Println("probing collection", collection.CollectionID)
+		req, err := getMockSearchRequest(ctx, cli, basePath, collection)
+		if err != nil {
+			fmt.Println("failed to generated mock request", err.Error())
+			continue
+		}
+
+		leaders, err := qc.GetShardLeaders(ctx, &querypbv2.GetShardLeadersRequest{
+			Base:         &commonpbv2.MsgBase{},
+			CollectionID: collection.CollectionID,
+		})
+		if err != nil {
+			fmt.Println("querycoord get shard leaders error", err.Error())
+			continue
+		}
+
+		for _, shard := range leaders.GetShards() {
+
+			for _, nodeID := range shard.GetNodeIds() {
+				qn, ok := qns[nodeID]
+				if !ok {
+					fmt.Printf("Shard leader %d not online\n", nodeID)
+					continue
+				}
+
+				ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+				req.DmlChannels = []string{shard.GetChannelName()}
+				req.Req.Base.TargetID = nodeID
+				resp, err := qn.Search(ctx, req)
+				cancel()
+				if err != nil {
+					fmt.Printf("Shard %s Leader[%d] failed to search with eventually consistency level, err: %s\n", shard.GetChannelName(), nodeID, err.Error())
+					afterFail()
+					continue
+				}
+				if resp.GetStatus().GetErrorCode() != commonpbv2.ErrorCode_Success {
+					fmt.Printf("Shard %s Leader[%d] failed to search,error code: %s reason:%s\n", shard.GetChannelName(), nodeID, resp.GetStatus().GetErrorCode().String(), resp.GetStatus().GetReason())
+					afterFail()
+					continue
+				}
+				fmt.Printf("Shard %s leader[%d] probe with search success.\n", shard.GetChannelName(), nodeID)
+			}
+		}
+
+	}
 }
 
 func getQueryCoordClient(sessions []*models.Session) (querypbv2.QueryCoordClient, error) {
