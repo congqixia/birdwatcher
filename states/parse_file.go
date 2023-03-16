@@ -1,6 +1,7 @@
 package states
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -55,8 +56,6 @@ func GetParseIndexParamCmd() *cobra.Command {
 				json.Unmarshal(data[0], &params)
 				fmt.Println(params)
 			case "SLICE_META":
-				fmt.Println(len(data))
-				fmt.Println(len(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`))
 				fmt.Println(string(data[0]))
 			}
 
@@ -129,8 +128,9 @@ func tryParseSliceMeta(file string) (string, int, error) {
 
 	}
 	meta := &SliceMeta{}
-	//	raw := bytes.TrimSpace(data[0])
-	err = json.Unmarshal([]byte(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`), meta)
+	raw := bytes.Trim(data[0], "\x00")
+	//err = json.Unmarshal([]byte(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`), meta)
+	err = json.Unmarshal(raw, meta)
 	if err != nil {
 		fmt.Println("failed to unmarsahl", err.Error())
 		return "", 0, err
