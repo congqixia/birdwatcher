@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/birdwatcher/storage"
@@ -86,50 +91,66 @@ func GetOrganizeIndexFilesCmd() *cobra.Command {
 				return
 			}
 
-			fmt.Println(prefix, num)
+			fmt.Printf("original file name: %s, slice num: %d\n", prefix, num)
 
+			m := make(map[int64]struct{})
+
+			filepath.Walk(folder, func(file string, info os.FileInfo, err error) error {
+				file = path.Base(file)
+				if !strings.HasPrefix(file, prefix+"_") {
+					fmt.Println("skip file", file)
+					return nil
+				}
+
+				suffix := file[len(prefix)+1:]
+				idx, err := strconv.ParseInt(suffix, 10, 64)
+				if err != nil {
+					fmt.Println(err.Error())
+					return nil
+				}
+
+				m[idx] = struct{}{}
+				return nil
+			})
+			if len(m) != num {
+				fmt.Println("slice files not complete", m)
+				return
+			}
+
+			output, err := os.OpenFile(fmt.Sprintf("%s_%s", prefix, time.Now().Format("060102150406")), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			defer output.Close()
+
+			for i := 0; i < num; i++ {
+				key := fmt.Sprintf("%s_%d", prefix, i)
+				data, err := readIndexFile(path.Join(folder, key), func(metaKey string) bool {
+					return metaKey == key
+				})
+				if err != nil {
+					fmt.Println(err.Error())
+					return
+				}
+
+				output.Write(data)
+			}
 		},
 	}
 	return cmd
 }
 
 func tryParseSliceMeta(file string) (string, int, error) {
-	if err := testFile(file); err != nil {
-		fmt.Println("failed to test SLICE_META")
-		return "", 0, err
-	}
-
-	f, err := openBackupFile(file)
-	if err != nil {
-		fmt.Println(err.Error())
-		return "", 0, err
-	}
-	defer f.Close()
-
-	r, evt, err := storage.NewIndexReader(f)
-	if err != nil {
-		fmt.Println(err.Error())
-		return "", 0, err
-	}
-	extra := make(map[string]any)
-	json.Unmarshal(evt.ExtraBytes, &extra)
-	key := extra["key"].(string)
-	if key != "SLICE_META" {
-		fmt.Println("file meta shows file not SLICE_META, but", key)
-		return "", 0, errors.New("file not SLICE_META")
-	}
-
-	data, err := r.NextEventReader(f, evt.PayloadDataType)
-	if err != nil {
-		fmt.Println(err.Error())
-		return "", 0, err
-	}
-	if len(data) != 1 {
-
-	}
+	data, err := readIndexFile(file, func(key string) bool {
+		if key != "SLICE_META" {
+			fmt.Println("failed meta indicates file content not SLICE_META but", key)
+			return false
+		}
+		return true
+	})
 	meta := &SliceMeta{}
-	raw := bytes.Trim(data[0], "\x00")
-	//err = json.Unmarshal([]byte(`{"meta":[{"name":"HNSW","slice_num":25,"total_len":407183076}]}`), meta)
+	raw := bytes.Trim(data, "\x00")
 	err = json.Unmarshal(raw, meta)
 	if err != nil {
 		fmt.Println("failed to unmarsahl", err.Error())
@@ -150,4 +171,38 @@ type SliceMeta struct {
 		SliceNum    int    `json:"slice_num"`
 		TotalLength int64  `json:"total_len"`
 	} `json:"meta"`
+}
+
+func readIndexFile(file string, validKey func(key string) bool) ([]byte, error) {
+	if err := testFile(file); err != nil {
+		fmt.Println("failed to test file", file)
+		return nil, err
+	}
+
+	f, err := openBackupFile(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r, evt, err := storage.NewIndexReader(f)
+	if err != nil {
+		return nil, err
+	}
+	extra := make(map[string]any)
+	json.Unmarshal(evt.ExtraBytes, &extra)
+	key := extra["key"].(string)
+	if !validKey(key) {
+		return nil, errors.New("file meta key not valid")
+	}
+
+	data, err := r.NextEventReader(f, evt.PayloadDataType)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) != 1 {
+		return nil, errors.Newf("index file suppose to contain only one block but got %d", len(data))
+	}
+
+	return data[0], nil
 }
