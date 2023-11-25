@@ -37,6 +37,13 @@ func (rs *PresetResultSet) String() string {
 	return rs.PrintAs(rs.format)
 }
 
+func NewPresetResultSet(rs ResultSet, format Format) *PresetResultSet {
+	return &PresetResultSet{
+		ResultSet: rs,
+		format:    format,
+	}
+}
+
 // NameFormat name to format mapping tool function.
 func NameFormat(name string) Format {
 	f, ok := name2Format[name]

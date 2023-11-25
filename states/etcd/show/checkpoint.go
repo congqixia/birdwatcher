@@ -2,9 +2,11 @@ package show
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/birdwatcher/framework"
@@ -12,6 +14,7 @@ import (
 	"github.com/milvus-io/birdwatcher/proto/v2.0/commonpb"
 	"github.com/milvus-io/birdwatcher/proto/v2.0/datapb"
 	"github.com/milvus-io/birdwatcher/proto/v2.0/internalpb"
+	"github.com/milvus-io/birdwatcher/proto/v2.2/msgpb"
 	"github.com/milvus-io/birdwatcher/states/etcd/common"
 	etcdversion "github.com/milvus-io/birdwatcher/states/etcd/version"
 	"github.com/milvus-io/birdwatcher/utils"
@@ -88,6 +91,23 @@ func (rs *Checkpoints) PrintAs(format framework.Format) string {
 				checkpoint.Source)
 		}
 		return sb.String()
+	case framework.FormatJSON:
+		sb := &strings.Builder{}
+		for _, checkpoint := range rs.Data {
+			output := make(map[string]any)
+			output["channel"] = checkpoint.Checkpoint.GetChannelName()
+			t, _ := utils.ParseTS(checkpoint.Checkpoint.GetTimestamp())
+			output["checkpoint_ts"] = t
+			output["lag_seconds"] = time.Since(t).Seconds()
+			bs, err := json.Marshal(output)
+			if err != nil {
+				fmt.Println(err.Error())
+				continue
+			}
+			sb.Write(bs)
+			sb.WriteString("\n")
+		}
+		return sb.String()
 	default:
 	}
 	return ""
@@ -143,4 +163,33 @@ func (c *ComponentShow) getCheckpointFromSegments(ctx context.Context, collID in
 	}
 
 	return pos, segmentID, nil
+}
+
+type CheckpointValidateParam struct {
+	framework.ParamBase `use:"show checkpoint-validate" desc:"list checkpoint collection vchannels" alias:"checkpoints,cp"`
+	Timeout             int64 `name:"timeout" default:"1200" desc:"timeout duration in seconds"`
+}
+
+func (c *ComponentShow) CheckpointValidateCommand(ctx context.Context, p *CheckpointValidateParam) (*framework.PresetResultSet, error) {
+	prefix := path.Join(c.basePath, "datacoord-meta", "channel-cp")
+	results, _, err := common.ListProtoObjects[msgpb.MsgPosition](ctx, c.client, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	var checkpoints []*Checkpoint
+	for _, checkpoint := range results {
+		t, _ := utils.ParseTS(checkpoint.GetTimestamp())
+		if time.Since(t) > time.Duration(p.Timeout)*time.Second {
+			checkpoints = append(checkpoints, &Checkpoint{
+				Channel: &models.Channel{
+					PhysicalName: checkpoint.GetChannelName(),
+				},
+				Checkpoint: models.NewMsgPosition(&checkpoint),
+				Source:     "channel-cp",
+			})
+		}
+	}
+
+	return framework.NewPresetResultSet(framework.NewListResult[Checkpoints](checkpoints), framework.FormatJSON), nil
 }
