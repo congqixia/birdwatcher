@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,6 +172,18 @@ type CheckpointValidateParam struct {
 }
 
 func (c *ComponentShow) CheckpointValidateCommand(ctx context.Context, p *CheckpointValidateParam) (*framework.PresetResultSet, error) {
+
+	collections, err := common.ListCollectionsVersion(ctx, c.client, c.basePath, models.GTEVersion2_2, func(coll *models.Collection) bool {
+		return coll.State == models.CollectionStateCollectionCreated
+	})
+	if err != nil {
+		return nil, err
+	}
+	collSet := make(map[int64]struct{})
+	for _, collection := range collections {
+		collSet[collection.ID] = struct{}{}
+	}
+
 	prefix := path.Join(c.basePath, "datacoord-meta", "channel-cp")
 	results, _, err := common.ListProtoObjects[msgpb.MsgPosition](ctx, c.client, prefix)
 	if err != nil {
@@ -179,6 +192,17 @@ func (c *ComponentShow) CheckpointValidateCommand(ctx context.Context, p *Checkp
 
 	var checkpoints []*Checkpoint
 	for _, checkpoint := range results {
+		collID, ok := parseCollectionIDFromVchannel(checkpoint.GetChannelName())
+		if !ok {
+			fmt.Println("vchannel cannot parse into collection id", checkpoint.GetChannelName())
+			continue
+		}
+		_, ok = collSet[collID]
+		// skip non-healthy collection
+		if !ok {
+			continue
+		}
+
 		t, _ := utils.ParseTS(checkpoint.GetTimestamp())
 		if time.Since(t) > time.Duration(p.Timeout)*time.Second {
 			checkpoints = append(checkpoints, &Checkpoint{
@@ -192,4 +216,22 @@ func (c *ComponentShow) CheckpointValidateCommand(ctx context.Context, p *Checkp
 	}
 
 	return framework.NewPresetResultSet(framework.NewListResult[Checkpoints](checkpoints), framework.FormatJSON), nil
+}
+
+func parseCollectionIDFromVchannel(vchan string) (int64, bool) {
+	last := strings.LastIndex(vchan, "_")
+	if last < 0 {
+		return -1, false
+	}
+	vchan = vchan[last+1:]
+	last = strings.LastIndex(vchan, "v")
+	if last < 0 {
+		return -1, false
+	}
+	collStr := vchan[:last]
+	collID, err := strconv.ParseInt(collStr, 10, 64)
+	if err != nil {
+		return -1, false
+	}
+	return collID, true
 }
