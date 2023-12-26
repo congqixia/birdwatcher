@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/birdwatcher/models"
 	"github.com/milvus-io/birdwatcher/proto/v2.0/commonpb"
@@ -217,6 +218,11 @@ func getConfigurationCmd(client configurationSource, id int64) *cobra.Command {
 		Short:   "call ShowConfigurations for config inspection",
 		Aliases: []string{"GetConfigurations", "configurations"},
 		Run: func(cmd *cobra.Command, args []string) {
+			prefix, err := cmd.Flags().GetString("prefix")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
 			resp, err := client.ShowConfigurations(context.Background(), &internalpbv2.ShowConfigurationsRequest{
 				Base: &commonpbv2.MsgBase{
 					SourceID: -1,
@@ -228,10 +234,14 @@ func getConfigurationCmd(client configurationSource, id int64) *cobra.Command {
 				return
 			}
 			for _, item := range resp.GetConfiguations() {
-				fmt.Printf("Key: %s, Value: %s\n", item.Key, item.Value)
+				if strings.HasPrefix(item.Key, prefix) {
+					fmt.Printf("Key: %s, Value: %s\n", item.Key, item.Value)
+				}
 			}
 		},
 	}
+
+	cmd.Flags().String("prefix", "", "configuration prefix filter")
 
 	return cmd
 }
