@@ -34,6 +34,7 @@ func (s *queryCoordState) SetupCommands() {
 		getMetricsCmd(s.client),
 		// configuration
 		getConfigurationCmd(s.clientv2, s.session.ServerID),
+		loadBalanceCmd(s.clientv2, s.session.ServerID),
 		// back
 		getBackCmd(s, s.prevState),
 		// exit
@@ -93,6 +94,50 @@ func getQueryCoordState(client querypb.QueryCoordClient, conn *grpc.ClientConn, 
 	state.SetupCommands()
 
 	return state
+}
+
+func loadBalanceCmd(clientv2 querypbv2.QueryCoordClient, id int64) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "load-balance",
+		Short: "manual load balance cmd",
+		Run: func(cmd *cobra.Command, args []string) {
+			srcNodeID, err := cmd.Flags().GetInt64("srcNode")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			collectionID, err := cmd.Flags().GetInt64("collection")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+
+			status, err := clientv2.LoadBalance(context.Background(), &querypbv2.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					TargetID: id,
+					SourceID: -1,
+				},
+				SourceNodeIDs: []int64{srcNodeID},
+				CollectionID:  collectionID,
+			})
+
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			if status.ErrorCode != commonpb.ErrorCode_Success {
+				fmt.Print(status.Reason)
+				return
+			}
+			fmt.Println("success")
+
+		},
+	}
+
+	cmd.Flags().Int64("srcNode", 0, "src QueryNode session id")
+	cmd.Flags().Int64("collection", 0, "collection id to balance")
+
+	return cmd
 }
 
 func checkerActivationCmd(clientv2 querypbv2.QueryCoordClient, id int64) *cobra.Command {
