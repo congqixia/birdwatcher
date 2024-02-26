@@ -70,6 +70,9 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 		var found bool
 
 		for _, segment := range segments {
+			if segment.State == models.SegmentStateDropped || segment.State == models.SegmentStateSegmentStateNone {
+				continue
+			}
 			binlogs := segment.GetBinlogs()
 			partKeyBinlog, ok := lo.Find(binlogs, func(binlog *models.FieldBinlog) bool {
 				return binlog.FieldID == partKeyField.FieldID
