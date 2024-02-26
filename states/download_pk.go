@@ -141,7 +141,8 @@ func getMinioClient() (*minio.Client, error) {
 	var cred *credentials.Credentials
 	switch result {
 	case "IAM":
-		if cloudProviderResult == "aws" {
+		switch cloudProviderResult {
+		case "aws":
 			input := promptui.Prompt{
 				Label: "IAM Endpoint",
 			}
@@ -151,6 +152,8 @@ func getMinioClient() (*minio.Client, error) {
 				return nil, err
 			}
 			cred = credentials.NewIAM(iamEndpoint)
+		case "gcp":
+			cred = credentials.NewStaticV2("", "", "")
 		}
 	case "AK/SK":
 
