@@ -119,6 +119,15 @@ func getMinioClient() (*minio.Client, error) {
 		useSSL = false
 	}
 
+	cloudProvider := promptui.Select{
+		Label: "Select Cloud provider",
+		Items: []string{"aws", "gcp"},
+	}
+	_, cloudProviderResult, err := cloudProvider.Run()
+	if err != nil {
+		return nil, err
+	}
+
 	sl := promptui.Select{
 		Label: "Select authentication method:",
 		Items: []string{"IAM", "AK/SK"},
@@ -132,16 +141,19 @@ func getMinioClient() (*minio.Client, error) {
 	var cred *credentials.Credentials
 	switch result {
 	case "IAM":
-		input := promptui.Prompt{
-			Label: "IAM Endpoint",
-		}
+		if cloudProviderResult == "aws" {
+			input := promptui.Prompt{
+				Label: "IAM Endpoint",
+			}
 
-		iamEndpoint, err := input.Run()
-		if err != nil {
-			return nil, err
+			iamEndpoint, err := input.Run()
+			if err != nil {
+				return nil, err
+			}
+			cred = credentials.NewIAM(iamEndpoint)
 		}
-		cred = credentials.NewIAM(iamEndpoint)
 	case "AK/SK":
+
 		p.HideEntered = true
 		p.Mask = rune('*')
 		p.Label = "AK"
@@ -155,7 +167,12 @@ func getMinioClient() (*minio.Client, error) {
 			return nil, err
 		}
 
-		cred = credentials.NewStaticV4(ak, sk, "")
+		switch cloudProviderResult {
+		case "aws":
+			cred = credentials.NewStaticV4(ak, sk, "")
+		case "gcp":
+			cred = credentials.NewStaticV2(ak, sk, "")
+		}
 	}
 
 	minioClient, err := minio.New(address, &minio.Options{
