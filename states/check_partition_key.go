@@ -59,10 +59,6 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 			}
 			return partition.ID, uint32(index)
 		})
-		idName := lo.SliceToMap(partitions, func(partition *models.Partition) (int64, string) {
-			return partition.ID, partition.Name
-		})
-
 		segments, err := common.ListSegmentsVersion(ctx, s.client, s.basePath, etcdversion.GetVersion(), func(segment *models.Segment) bool {
 			return segment.CollectionID == collection.ID
 		})
@@ -70,6 +66,8 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 		if err != nil {
 			return err
 		}
+
+		var found bool
 
 		for _, segment := range segments {
 			binlogs := segment.GetBinlogs()
@@ -80,9 +78,7 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 				continue
 			}
 			targetIdx := partIdx[segment.PartitionID]
-			fmt.Printf("Segment: %d, Partition: %s, Target Index: %d\n", segment.ID, idName[segment.PartitionID], targetIdx)
 			for _, binlog := range partKeyBinlog.Binlogs {
-
 				filePath := strings.Replace(binlog.LogPath, "ROOT_PATH", p.RootPath, -1)
 				func(filePath string) {
 					result, err := client.GetObject(ctx, bucketName, filePath, minio.GetObjectOptions{})
@@ -100,7 +96,8 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 							for _, val := range data {
 								h, _ := Hash32Int64(val)
 								if (h % uint32(len(partitions))) != targetIdx {
-									target++
+									found = true
+									return
 								}
 							}
 						}
@@ -111,17 +108,25 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 							for _, val := range data {
 								h := HashString2Uint32(val)
 								if (h % uint32(len(partitions))) != targetIdx {
-									target++
+									found = true
+									return
 								}
 							}
 						}
 					}
 					if target > 0 {
-						fmt.Printf("Segment: %d, Path: %s, mismatch found: %d\n", segment.ID, filePath, target)
+						// fmt.Printf("Segment: %d, Path: %s, mismatch found: %d\n", segment.ID, filePath, target)
+						found = true
+						return
 					}
 				}(filePath)
-
+				if found {
+					break
+				}
 			}
+		}
+		if found {
+			fmt.Printf("Collection found %d %s\n", collection.ID, collection.Schema.Name)
 		}
 	}
 	return nil
