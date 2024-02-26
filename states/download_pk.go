@@ -138,7 +138,10 @@ func getMinioClient() (*minio.Client, error) {
 	}
 	fmt.Println("Use authen: ", result)
 
-	var cred *credentials.Credentials
+	opts := &minio.Options{
+		Secure: useSSL,
+	}
+	// var cred *credentials.Credentials
 	switch result {
 	case "IAM":
 		switch cloudProviderResult {
@@ -151,12 +154,13 @@ func getMinioClient() (*minio.Client, error) {
 			if err != nil {
 				return nil, err
 			}
-			cred = credentials.NewIAM(iamEndpoint)
+			opts.Creds = credentials.NewIAM(iamEndpoint)
 		case "gcp":
-			cred = credentials.NewStaticV2("", "", "")
+			transport, _ := NewWrapHTTPTransport(opts.Secure)
+			opts.Creds = credentials.NewStaticV2("", "", "")
+			opts.Transport = transport
 		}
 	case "AK/SK":
-
 		p.HideEntered = true
 		p.Mask = rune('*')
 		p.Label = "AK"
@@ -172,16 +176,13 @@ func getMinioClient() (*minio.Client, error) {
 
 		switch cloudProviderResult {
 		case "aws":
-			cred = credentials.NewStaticV4(ak, sk, "")
+			opts.Creds = credentials.NewStaticV4(ak, sk, "")
 		case "gcp":
-			cred = credentials.NewStaticV2(ak, sk, "")
+			opts.Creds = credentials.NewStaticV2(ak, sk, "")
 		}
 	}
 
-	minioClient, err := minio.New(address, &minio.Options{
-		Creds:  cred,
-		Secure: useSSL,
-	})
+	minioClient, err := minio.New(address, opts)
 
 	if err != nil {
 		return nil, err
