@@ -164,3 +164,43 @@ func (s *InstanceState) ReleaseCollectionCommand(ctx context.Context, p *Release
 	fmt.Printf("load collection: %s\n", resp.GetErrorCode().String())
 	return nil
 }
+
+type CompactCollectionParam struct {
+	framework.ParamBase `use:"compact collection" desc:"release collection"`
+	DB                  int64 `name:"db" default:"0" desc:"db id"`
+	Collection          int64 `name:"collection" default:"0" desc:"collection ID"`
+	Major               bool  `name:"major" default:"false" desc:"is major"`
+}
+
+func (s *InstanceState) CompactCollectionCommand(ctx context.Context, p *CompactCollectionParam) error {
+	sessions, err := common.ListSessions(s.client, s.basePath)
+	if err != nil {
+		return err
+	}
+	dcSession, found := lo.Find(sessions, func(session *models.Session) bool {
+		return session.ServerName == "datacoord"
+	})
+	if !found {
+		return errors.New("querycoord session not found")
+	}
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	}
+	conn, err := grpc.DialContext(ctx, dcSession.Address, opts...)
+	if err != nil {
+		return errors.New("find to connect to querycoord")
+	}
+	datacoord := datapbv2.NewDataCoordClient(conn)
+
+	resp, err := datacoord.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+		CollectionID:    p.Collection,
+		MajorCompaction: p.Major,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("compact collection: %s, planID: %d\n", resp.GetStatus().GetErrorCode().String(), resp.GetCompactionID())
+	return nil
+}
