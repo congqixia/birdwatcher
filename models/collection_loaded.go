@@ -21,6 +21,7 @@ type CollectionLoaded struct {
 	// since 2.2
 	Status       LoadStatus
 	FieldIndexID map[int64]int64
+	LoadFields   []int64
 
 	// orignial etcd Key
 	Key     string
@@ -56,6 +57,7 @@ func NewCollectionLoadedV2_2(info *querypbv2.CollectionLoadInfo, key string) *Co
 	c.ReleasedPartitionIDs = info.GetReleasedPartitions()
 	c.Status = LoadStatus(info.GetStatus())
 	c.FieldIndexID = info.GetFieldIndexID()
+	c.LoadFields = info.GetLoadFields()
 	c.Version = GTEVersion2_2
 	c.Key = key
 	return c
