@@ -1,6 +1,8 @@
 package models
 
 import (
+	"sort"
+
 	"github.com/milvus-io/birdwatcher/proto/v2.0/querypb"
 	querypbv2 "github.com/milvus-io/birdwatcher/proto/v2.2/querypb"
 )
@@ -58,6 +60,9 @@ func NewCollectionLoadedV2_2(info *querypbv2.CollectionLoadInfo, key string) *Co
 	c.Status = LoadStatus(info.GetStatus())
 	c.FieldIndexID = info.GetFieldIndexID()
 	c.LoadFields = info.GetLoadFields()
+	sort.Slice(c.LoadFields, func(i, j int) bool {
+		return c.LoadFields[i] < c.LoadFields[j]
+	})
 	c.Version = GTEVersion2_2
 	c.Key = key
 	return c
