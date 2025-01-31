@@ -63,4 +63,5 @@ func (rs *CollectionsLoaded) printCollectionLoaded(sb *strings.Builder, info *mo
 	case models.GTEVersion2_2:
 		fmt.Fprintf(sb, "\tLoadStatus: %s\n", info.Status.String())
 	}
+	fmt.Fprintf(sb, "LoadFields: %v\n", info.LoadFields)
 }
