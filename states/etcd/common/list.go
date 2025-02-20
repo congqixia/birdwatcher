@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
+	protov2 "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/runtime/protoiface"
 
 	"github.com/milvus-io/birdwatcher/states/kv"
@@ -58,6 +59,43 @@ LOOP:
 		var elem T
 		info := P(&elem)
 		err = proto.Unmarshal([]byte(val), info)
+		if err != nil {
+			if bytes.Equal([]byte(val), []byte{0xE2, 0x9B, 0xBC}) {
+				fmt.Printf("Tombstone found, key: %s\n", keys[idx])
+				continue
+			}
+			fmt.Printf("failed to unmarshal key=%s, err: %s\n", keys[idx], err.Error())
+			continue
+		}
+
+		for _, filter := range filters {
+			if !filter(&elem) {
+				continue LOOP
+			}
+		}
+		result = append(result, elem)
+	}
+	return result, keys, nil
+}
+
+// ListProtoObjects returns proto objects with specified prefix.
+func ListProtoObjectsV2[T any, P interface {
+	*T
+	protov2.Message
+}](ctx context.Context, kv kv.MetaKV, prefix string, filters ...func(t *T) bool) ([]T, []string, error) {
+	keys, vals, err := kv.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(keys) != len(vals) {
+		return nil, nil, fmt.Errorf("error: keys and vals of different size in ListProtoObjects:%d vs %d", len(keys), len(vals))
+	}
+	result := make([]T, 0, len(keys))
+LOOP:
+	for idx, val := range vals {
+		var elem T
+		info := P(&elem)
+		err = protov2.Unmarshal([]byte(val), info)
 		if err != nil {
 			if bytes.Equal([]byte(val), []byte{0xE2, 0x9B, 0xBC}) {
 				fmt.Printf("Tombstone found, key: %s\n", keys[idx])

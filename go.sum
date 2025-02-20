@@ -568,6 +568,10 @@ github.com/matttproud/golang_protobuf_extensions v1.0.4/go.mod h1:BSXmuO+STAnVfr
 github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i4n7wVopoX3x7Bv8=
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5 h1:ci2uc+1Es669AM6KDFa/m1kmUKlHo/lidM/8/G6isG8=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus/pkg v0.0.2-0.20250220053357-b7c631f0b7f9 h1:IEw68pi/LFOiwyF1bAsUfwUBmCaY3j9kAwodCZxq/tc=
+github.com/milvus-io/milvus/pkg v0.0.2-0.20250220053357-b7c631f0b7f9/go.mod h1:NmwQrk0beEesiZJCwmL1ZrbQBv4DulSbm5mA9/jYPyo=
 github.com/milvus-io/pulsar-client-go v0.6.8 h1:fZdZH73aPRszu2fazyeeahQEz34tyn1Pt9EkqJmV100=
 github.com/milvus-io/pulsar-client-go v0.6.8/go.mod h1:oFIlYIk23tamkSLttw849qphmMIpHY8ztEBWDWJW+sc=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 h1:AMFGa4R4MiIpspGNG7Z948v4n35fFGB3RR3G/ry4FWs=
