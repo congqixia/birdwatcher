@@ -33,9 +33,9 @@ func (c *ComponentShow) CollectionFilterCommand(ctx context.Context, p *Collecti
 
 LOOP:
 	for _, index := range fieldIndexes {
-		for _, kv := range index.IndexInfo.TypeParams {
+		for _, kv := range index.IndexInfo.IndexParams {
 			if kv.Key == "index_type" && (kv.Value == "INVERTED" || kv.Value == "BITMAP") {
-				fmt.Println("legacy index found for collection [%d]%s", index.IndexInfo.CollectionID, id2name[index.IndexInfo.CollectionID])
+				fmt.Printf("legacy index found for collection [%d]%s\n", index.IndexInfo.CollectionID, id2name[index.IndexInfo.CollectionID])
 				continue LOOP
 			}
 		}
