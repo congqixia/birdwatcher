@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path"
 
 	"github.com/milvus-io/birdwatcher/models"
@@ -29,6 +30,7 @@ func ListSessionsByPrefix(ctx context.Context, cli kv.MetaKV, prefix string) ([]
 	sessions := make([]*models.Session, 0, len(vals))
 	for idx, val := range vals {
 		session := &models.Session{}
+		fmt.Println(val)
 		err := json.Unmarshal([]byte(val), session)
 		if err != nil {
 			continue
