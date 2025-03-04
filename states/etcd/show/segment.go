@@ -22,6 +22,7 @@ type SegmentParam struct {
 	PartitionID         int64  `name:"partition" default:"0" desc:"partition id to filter with"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"segment id to display"`
 	Format              string `name:"format" default:"line" desc:"segment display format"`
+	LogType             string `name:"logType" default:"" desc:"specify the log type to display only in detail mode"`
 	Detail              bool   `name:"detail" default:"false" desc:"flags indicating whether printing detail binlog info"`
 	State               string `name:"state" default:"" desc:"target segment state"`
 	Level               string `name:"level" default:"" desc:"target segment level"`
@@ -98,7 +99,7 @@ func (c *ComponentShow) SegmentCommand(ctx context.Context, p *SegmentParam) err
 
 			switch p.Format {
 			case "table":
-				PrintSegmentInfo(info, p.Detail)
+				PrintSegmentInfo(info, p.Detail, p.LogType)
 			case "line":
 				fmt.Printf("SegmentID: %d PartitionID: %d State: %s, Level: %s, Row Count:%d,  PartitionStatsVersion:%d, IsSorted: %v \n",
 					info.ID, info.PartitionID, info.State.String(), info.Level.String(), info.NumOfRows, info.PartitionStatsVersion, info.IsSorted)
@@ -191,7 +192,7 @@ const (
 )
 
 // PrintSegmentInfo prints segments info
-func PrintSegmentInfo(info *models.Segment, detailBinlog bool) {
+func PrintSegmentInfo(info *models.Segment, detailBinlog bool, logType string) {
 	fmt.Println("================================================================================")
 	fmt.Printf("Segment ID: %d\n", info.ID)
 	fmt.Printf("Segment State: %v", info.State)
@@ -223,67 +224,76 @@ func PrintSegmentInfo(info *models.Segment, detailBinlog bool) {
 		countBinlogNum(info.GetBinlogs()), countBinlogNum(info.GetStatslogs()), countBinlogNum(info.GetDeltalogs()))
 
 	if detailBinlog {
-		var binlogSize int64
-		var insertmemSize int64
-		fmt.Println("**************************************")
-		fmt.Println("Binlogs:")
-		sort.Slice(info.GetBinlogs(), func(i, j int) bool {
-			return info.GetBinlogs()[i].FieldID < info.GetBinlogs()[j].FieldID
-		})
-		for _, log := range info.GetBinlogs() {
-			var fieldLogSize int64
-			fmt.Printf("Field %d:\n", log.FieldID)
-			for _, binlog := range log.Binlogs {
-				fmt.Printf("Path: %s\n", binlog.LogPath)
-				tf, _ := utils.ParseTS(binlog.TimestampFrom)
-				tt, _ := utils.ParseTS(binlog.TimestampTo)
-				fmt.Printf("LogID: %d \t Mem Size: %d \t Log Size: %d \t Entry Num: %d\t TimeRange:%s-%s\n",
-					binlog.LogID, binlog.MemSize,
-					binlog.LogSize, binlog.EntriesNum,
-					tf.Format(tsPrintFormat), tt.Format(tsPrintFormat))
-				binlogSize += binlog.LogSize
-				insertmemSize += binlog.MemSize
-				fieldLogSize += binlog.LogSize
+		if logType == "" || strings.EqualFold(logType, "binlog") {
+			var binlogSize int64
+			var insertmemSize int64
+			fmt.Println("**************************************")
+			fmt.Println("Binlogs:")
+			sort.Slice(info.GetBinlogs(), func(i, j int) bool {
+				return info.GetBinlogs()[i].FieldID < info.GetBinlogs()[j].FieldID
+			})
+			for _, log := range info.GetBinlogs() {
+				var fieldLogSize int64
+				fmt.Printf("Field %d:\n", log.FieldID)
+				for _, binlog := range log.Binlogs {
+					fmt.Printf("Path: %s\n", binlog.LogPath)
+					tf, _ := utils.ParseTS(binlog.TimestampFrom)
+					tt, _ := utils.ParseTS(binlog.TimestampTo)
+					fmt.Printf("LogID: %d \t Mem Size: %d \t Log Size: %d \t Entry Num: %d\t TimeRange:%s-%s\n",
+						binlog.LogID, binlog.MemSize,
+						binlog.LogSize, binlog.EntriesNum,
+						tf.Format(tsPrintFormat), tt.Format(tsPrintFormat))
+					binlogSize += binlog.LogSize
+					insertmemSize += binlog.MemSize
+					fieldLogSize += binlog.LogSize
+				}
+				fmt.Println("--- Field Log Size:", hrSize(fieldLogSize))
 			}
-			fmt.Println("--- Field Log Size:", hrSize(fieldLogSize))
+			fmt.Println("=== Segment Total Binlog Size: ", hrSize(binlogSize))
+			fmt.Println("=== Segment Total Binlog Mem Size: ", hrSize(insertmemSize))
 		}
-		fmt.Println("=== Segment Total Binlog Size: ", hrSize(binlogSize))
-		fmt.Println("=== Segment Total Binlog Mem Size: ", hrSize(insertmemSize))
 
-		fmt.Println("**************************************")
-		fmt.Println("Statslogs:")
-		sort.Slice(info.GetStatslogs(), func(i, j int) bool {
-			return info.GetStatslogs()[i].FieldID < info.GetStatslogs()[j].FieldID
-		})
-		var statsLogSize int64
-		for _, log := range info.GetStatslogs() {
-			fmt.Printf("Field %d:\n", log.FieldID)
-			for _, binlog := range log.Binlogs {
-				fmt.Printf("Path: %s\n", binlog.LogPath)
-				tf, _ := utils.ParseTS(binlog.TimestampFrom)
-				tt, _ := utils.ParseTS(binlog.TimestampTo)
-				fmt.Printf("LogID: %d \t Log Size: %d \t Entry Num: %d\t TimeRange:%s-%s\n",
-					binlog.LogID, binlog.LogSize, binlog.EntriesNum,
-					tf.Format(tsPrintFormat), tt.Format(tsPrintFormat))
-				statsLogSize += binlog.LogSize
+		if logType == "" || strings.EqualFold(logType, "statslog") {
+			fmt.Println("**************************************")
+			fmt.Println("Statslogs:")
+			sort.Slice(info.GetStatslogs(), func(i, j int) bool {
+				return info.GetStatslogs()[i].FieldID < info.GetStatslogs()[j].FieldID
+			})
+			var statsLogSize int64
+			for _, log := range info.GetStatslogs() {
+				fmt.Printf("Field %d:\n", log.FieldID)
+				for _, binlog := range log.Binlogs {
+					fmt.Printf("Path: %s\n", binlog.LogPath)
+					tf, _ := utils.ParseTS(binlog.TimestampFrom)
+					tt, _ := utils.ParseTS(binlog.TimestampTo)
+					fmt.Printf("LogID: %d \t Log Size: %d \t Entry Num: %d\t TimeRange:%s-%s\n",
+						binlog.LogID, binlog.LogSize, binlog.EntriesNum,
+						tf.Format(tsPrintFormat), tt.Format(tsPrintFormat))
+					statsLogSize += binlog.LogSize
+				}
 			}
+			fmt.Println("=== Segment Total Statslog Size: ", hrSize(statsLogSize))
 		}
-		fmt.Println("=== Segment Total Statslog Size: ", hrSize(statsLogSize))
 
-		fmt.Println("**************************************")
-		fmt.Println("Delta Logs:")
-		var deltaLogSize int64
-		var memSize int64
-		for _, log := range info.GetDeltalogs() {
-			for _, l := range log.Binlogs {
-				fmt.Printf("Entries: %d From: %v - To: %v\n", l.EntriesNum, l.TimestampFrom, l.TimestampTo)
-				fmt.Printf("LogID: %d, Path: %v LogSize: %s, MemSize: %s\n", l.LogID, l.LogPath, hrSize(l.LogSize), hrSize(l.MemSize))
-				deltaLogSize += l.LogSize
-				memSize += l.MemSize
+		if logType == "" || strings.EqualFold(logType, "deltalog") {
+			fmt.Println("**************************************")
+			fmt.Println("Delta Logs:")
+			var deltaLogSize int64
+			var memSize int64
+			var deltaEntryNum int64
+			for _, log := range info.GetDeltalogs() {
+				for _, l := range log.Binlogs {
+					fmt.Printf("Entries: %d From: %v - To: %v\n", l.EntriesNum, l.TimestampFrom, l.TimestampTo)
+					fmt.Printf("LogID: %d, Path: %v LogSize: %s, MemSize: %s\n", l.LogID, l.LogPath, hrSize(l.LogSize), hrSize(l.MemSize))
+					deltaLogSize += l.LogSize
+					memSize += l.MemSize
+					deltaEntryNum += l.EntriesNum
+				}
 			}
+			fmt.Println("=== Segment Total Delta entry num: ", deltaEntryNum)
+			fmt.Println("=== Segment Total Deltalog Size: ", hrSize(deltaLogSize))
+			fmt.Println("=== Segment Total Deltalog Mem Size: ", hrSize(memSize))
 		}
-		fmt.Println("=== Segment Total Deltalog Size: ", hrSize(deltaLogSize))
-		fmt.Println("=== Segment Total Deltalog Mem Size: ", hrSize(memSize))
 	}
 
 	fmt.Println("================================================================================")
