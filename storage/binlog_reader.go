@@ -84,6 +84,12 @@ func (reader *BinlogReader) NextFloat64EventReader() ([]float64, error) {
 	return readData[float64, *file.Float64ColumnChunkReader](reader.reader, 0)
 }
 
+func (reader *BinlogReader) NextJSONEventReader() ([]string, error) {
+	return readDataTrans[parquet.ByteArray, string, *file.ByteArrayColumnChunkReader](reader.reader, 0, func(v parquet.ByteArray) string {
+		return string(v)
+	})
+}
+
 func (reader *BinlogReader) NextVarcharEventReader() ([]string, error) {
 	return readDataTrans[parquet.ByteArray, string, *file.ByteArrayColumnChunkReader](reader.reader, 0, func(v parquet.ByteArray) string {
 		return v.String()
