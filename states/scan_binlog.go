@@ -212,6 +212,10 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 				}
 
 				switch strings.ToLower(p.Action) {
+				case "print":
+					fmt.Println(lo.MapKeys(values, func(_ any, fid int64) string {
+						return fields[fid].Name
+					}))
 				case "count":
 					count++
 				case "locate":
