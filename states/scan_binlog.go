@@ -333,6 +333,9 @@ func (s *InstanceState) scanBinlogs(pk storage.ReadSeeker, fields map[int64]stor
 			case schemapb.DataType_Double:
 				values := data.([]float64)
 				fields[fid] = values[idx]
+			case schemapb.DataType_JSON:
+				values := data.([]string)
+				fields[fid] = values[idx]
 			}
 		}
 		err = scanner(pk, idx, fields)
