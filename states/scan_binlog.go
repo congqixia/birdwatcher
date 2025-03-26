@@ -281,6 +281,8 @@ func (s *InstanceState) scanBinlogs(pk storage.ReadSeeker, fields map[int64]stor
 			data, err = reader.NextFloat32EventReader()
 		case schemapb.DataType_Double:
 			data, err = reader.NextFloat64EventReader()
+		case schemapb.DataType_JSON:
+			data, err = reader.NextJSONEventReader()
 		}
 		if err != nil {
 			readerErr = err
