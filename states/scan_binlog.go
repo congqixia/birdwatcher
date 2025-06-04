@@ -83,6 +83,9 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 	if p.MinioAddress != "" {
 		params = append(params, oss.WithMinioAddr(p.MinioAddress))
 	}
+	if p.AK != "" && p.SK != "" {
+		params = append(params, oss.WithAK(p.AK), oss.WithSK(p.SK), oss.UseIAM(false))
+	}
 
 	minioClient, bucketName, rootPath, err := s.GetMinioClientFromCfg(ctx, params...)
 	if err != nil {

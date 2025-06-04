@@ -62,6 +62,12 @@ func WithSK(sk string) MinioConnectParam {
 	}
 }
 
+func UseIAM(use bool) MinioConnectParam {
+	return func(p *MinioClientParam) {
+		p.UseIAM = use
+	}
+}
+
 // MinioClient wraps minio client, bucket info within
 type MinioClient struct {
 	Client     *minio.Client
