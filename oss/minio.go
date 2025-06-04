@@ -50,6 +50,18 @@ func WithMinioAddr(addr string) MinioConnectParam {
 	}
 }
 
+func WithAK(ak string) MinioConnectParam {
+	return func(p *MinioClientParam) {
+		p.AK = ak
+	}
+}
+
+func WithSK(sk string) MinioConnectParam {
+	return func(p *MinioClientParam) {
+		p.SK = sk
+	}
+}
+
 // MinioClient wraps minio client, bucket info within
 type MinioClient struct {
 	Client     *minio.Client

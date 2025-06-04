@@ -34,6 +34,9 @@ type ScanBinlogParams struct {
 	IgnoreDelete        bool     `name:"ignoreDelete" default:"false" desc:"ignore delete logic"`
 	IncludeUnhealthy    bool     `name:"includeUnhealthy" default:"false" desc:"also check dropped segments"`
 	WorkerNum           int64    `name:"workerNum" default:"4" desc:"worker num"`
+
+	AK string `name:"ak" default:"" desc:"minio access key"`
+	SK string `name:"sk" default:"" desc:"minio secret key"`
 }
 
 func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogParams) error {
