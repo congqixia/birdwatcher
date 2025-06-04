@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/expr-lang/expr"
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/birdwatcher/framework"
 	"github.com/milvus-io/birdwatcher/models"
@@ -31,6 +33,7 @@ type ScanBinlogParams struct {
 	Action              string   `name:"action" default:"count"`
 	IgnoreDelete        bool     `name:"ignoreDelete" default:"false" desc:"ignore delete logic"`
 	IncludeUnhealthy    bool     `name:"includeUnhealthy" default:"false" desc:"also check dropped segments"`
+	WorkerNum           int64    `name:"workerNum" default:"4" desc:"worker num"`
 }
 
 func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogParams) error {
@@ -88,11 +91,12 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 
 	// prepare action dataset
 	// count
-	var count int64
+	var count atomic.Int64
 	// locate do nothing
 	// dedup
-	ids := make(map[any]struct{})
-	dedupResult := make(map[any]int64)
+	// ids := make(map[any]struct{})
+	ids := sync.Map{}
+	dedupResult := sync.Map{} //make(map[any]int64)
 
 	getObject := func(binlogPath string) (*minio.Object, error) {
 		logPath := strings.ReplaceAll(binlogPath, "ROOT_PATH", rootPath)
@@ -138,7 +142,10 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 		addDeltaRecords(segment, l0DeleteRecords)
 	}
 
-	for _, segment := range normalSegments {
+	taskCh := make(chan *models.Segment)
+	closeCh := make(chan struct{})
+
+	workFn := func(segment *models.Segment) error {
 		deletedRecords := make(map[any]uint64) // pk => ts
 		addDeltaRecords(segment, deletedRecords)
 
@@ -156,7 +163,7 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 
 		if pkBinlog == nil {
 			fmt.Printf("PK Binlog not found, segment %d\n", segment.ID)
-			continue
+			return nil
 		}
 
 		for idx, binlog := range pkBinlog.Binlogs {
@@ -213,16 +220,17 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 
 				switch strings.ToLower(p.Action) {
 				case "count":
-					count++
+					count.Inc()
 				case "locate":
 					fmt.Printf("entry found, segment %d offset %d, pk: %v, ts: %d\n", segment.ID, offset, pk.GetValue(), ts)
 					fmt.Printf("binlog batch %d, pk binlog %s\n", idx, binlog.LogPath)
 				case "dedup":
-					_, ok := ids[pkv]
+					_, ok := ids.LoadOrStore(pkv, struct{}{})
 					if ok {
-						dedupResult[pkv]++
+						count.Inc()
+						v, _ := dedupResult.LoadOrStore(pkv, atomic.NewInt64(0))
+						v.(*atomic.Int64).Inc()
 					}
-					ids[pkv] = struct{}{}
 				}
 				return nil
 			})
@@ -230,22 +238,55 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 				return err
 			}
 		}
+		return err
 	}
+
+	var wg sync.WaitGroup
+	wg.Add(int(p.WorkerNum))
+	var taskWg sync.WaitGroup
+
+	num := atomic.NewInt64(int64(len(normalSegments)))
+
+	for i := 0; i < int(p.WorkerNum); i++ {
+		go func() {
+			defer wg.Done()
+			select {
+			case segment := <-taskCh:
+				err := workFn(segment)
+				if err != nil {
+					fmt.Println(err)
+				}
+				taskWg.Done()
+				fmt.Printf("%d/%d done", num.Dec(), len(normalSegments))
+			case <-closeCh:
+			}
+		}()
+	}
+
+	for _, segment := range normalSegments {
+		taskWg.Add(1)
+		taskCh <- segment
+	}
+
+	taskWg.Wait()
+	close(closeCh)
+	wg.Wait()
 
 	switch strings.ToLower(p.Action) {
 	case "count":
-		fmt.Printf("Total %d entries found\n", count)
+		fmt.Printf("Total %d entries found\n", count.Load())
 	case "dedup":
-		total := len(dedupResult)
+		total := count.Load()
 		fmt.Printf("%d duplicated entries found\n", total)
 		var i int64
-		for pk, cnt := range dedupResult {
+		dedupResult.Range(func(pk, cnt any) bool {
 			if i > 10 {
-				break
+				return false
 			}
-			fmt.Printf("PK[%s] %v duplicated %d times\n", pkField.Name, pk, cnt+1)
+			fmt.Printf("PK[%s] %v duplicated %d times\n", pkField.Name, pk, cnt.(*atomic.Int64).Load()+1)
 			i++
-		}
+			return true
+		})
 	default:
 	}
 
