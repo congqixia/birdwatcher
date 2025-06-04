@@ -261,8 +261,9 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 						fmt.Println(err)
 					}
 					taskWg.Done()
-					fmt.Printf("%d/%d done\n", num.Dec(), len(normalSegments))
+					fmt.Printf("%d/%d done, current counter: %d\n", num.Dec(), len(normalSegments), count.Load())
 				case <-closeCh:
+					return
 				}
 			}
 		}()
