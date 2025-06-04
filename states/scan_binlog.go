@@ -250,15 +250,20 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 	for i := 0; i < int(p.WorkerNum); i++ {
 		go func() {
 			defer wg.Done()
-			select {
-			case segment := <-taskCh:
-				err := workFn(segment)
-				if err != nil {
-					fmt.Println(err)
+			for {
+				select {
+				case segment, ok := <-taskCh:
+					if !ok {
+						return
+					}
+					err := workFn(segment)
+					if err != nil {
+						fmt.Println(err)
+					}
+					taskWg.Done()
+					fmt.Printf("%d/%d done", num.Dec(), len(normalSegments))
+				case <-closeCh:
 				}
-				taskWg.Done()
-				fmt.Printf("%d/%d done", num.Dec(), len(normalSegments))
-			case <-closeCh:
 			}
 		}()
 	}
@@ -267,6 +272,7 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 		taskWg.Add(1)
 		taskCh <- segment
 	}
+	close(taskCh)
 
 	taskWg.Wait()
 	close(closeCh)
