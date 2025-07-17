@@ -28,7 +28,7 @@ func (reader *BinlogReader) NextRecordReader(ctx context.Context) (pqarrow.Recor
 	if reader.rgIndex >= reader.arrReader.ParquetReader().NumRowGroups() {
 		return nil, io.EOF
 	}
-	rr, err := reader.arrReader.GetRecordReader(context.Background(), reader.selectedColumn, []int{reader.rgIndex})
+	rr, err := reader.arrReader.GetRecordReader(ctx, reader.selectedColumn, []int{reader.rgIndex})
 	reader.rgIndex++
 	return rr, err
 }
@@ -41,7 +41,9 @@ func (reader *BinlogReader) SelectFields(fields []int64) {
 	outputFields := make(map[int]int64)
 	reader.selectedColumn = lo.FilterMap(fields, func(v int64, _ int) (int, bool) {
 		colIdx, ok := reader.mapping[v]
-		outputFields[colIdx] = v
+		if ok {
+			outputFields[colIdx] = v
+		}
 		return colIdx, ok
 	})
 
