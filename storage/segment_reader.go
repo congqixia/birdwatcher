@@ -123,6 +123,7 @@ func (crr *SegmentBinlogRecordReader) Next(ctx context.Context) (common.RecordBa
 		recs := make([]arrow.Array, len(crr.outputFields))
 
 		index := make(map[int64]int)
+		var recIdx int
 		for i, br := range crr.brs {
 			mapping := br.GetMapping()
 			rr := crr.rrs[i]
@@ -133,10 +134,11 @@ func (crr *SegmentBinlogRecordReader) Next(ctx context.Context) (common.RecordBa
 
 			rec := rr.Record()
 			for fieldID, idx := range mapping {
-				for i, output := range crr.outputFields {
+				for _, output := range crr.outputFields {
 					if fieldID == output {
-						recs[i] = rec.Column(idx)
-						index[fieldID] = i
+						recs[recIdx] = rec.Column(idx)
+						index[fieldID] = recIdx
+						recIdx++
 					}
 				}
 			}
