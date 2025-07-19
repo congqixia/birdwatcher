@@ -59,6 +59,30 @@ func (s *queryCoordState) BalanceSegmentCommand(ctx context.Context, p *BalanceS
 	return nil
 }
 
+type LoadParam struct {
+	framework.ParamBase `use:"balance-segment" desc:"balance segment"`
+	CollectionID        int64 `name:"collection" default:"0"`
+	Refresh             bool  `name:"refresh" default:"false" desc:"whether to refresh the collection"`
+}
+
+func (s *queryCoordState) LoadCommand(ctx context.Context, p *LoadParam) error {
+	req := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			TargetID: s.session.ServerID,
+			MsgType:  commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: p.CollectionID,
+		Refresh:      p.Refresh,
+	}
+
+	resp, err := s.client.LoadCollection(ctx, req)
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp)
+	return nil
+}
+
 /*
 func (s *queryCoordState) ShowCollectionCmd() *cobra.Command {
 	cmd := &cobra.Command{
