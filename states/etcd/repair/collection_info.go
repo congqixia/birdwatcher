@@ -74,29 +74,28 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 		}
 	}
 
-	data, err := os.ReadFile(p.Path)
-	if err != nil {
-		return err
-	}
-
-	var config ListModel
-
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Collection Info cnt:", len(config.Infos))
-	id2info := lo.SliceToMap(config.Infos, func(item *CollectionInfoModel) (int64, *CollectionInfoModel) {
-		return item.CollectionID, item
-	})
-
 	var collectionInfo *CollectionInfoModel
 	var dbInfo *models.Database
 	var ok bool
 
 	if p.Path != "" {
 		fmt.Println("Use backup metafield:", p.Path)
+		data, err := os.ReadFile(p.Path)
+		if err != nil {
+			return err
+		}
+
+		var config ListModel
+
+		err = json.Unmarshal(data, &config)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Collection Info cnt:", len(config.Infos))
+		id2info := lo.SliceToMap(config.Infos, func(item *CollectionInfoModel) (int64, *CollectionInfoModel) {
+			return item.CollectionID, item
+		})
+
 		collectionInfo, ok = id2info[p.CollectionID]
 		if !ok {
 			return fmt.Errorf("collection ID %d not found in the collection info file", p.CollectionID)
