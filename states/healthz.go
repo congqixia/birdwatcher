@@ -14,7 +14,9 @@ import (
 	"github.com/milvus-io/birdwatcher/models"
 	"github.com/milvus-io/birdwatcher/states/etcd/common"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 )
 
 type HealthzCheckParam struct {
@@ -61,6 +63,12 @@ func (c *InstanceState) HealthzCheckCommand(ctx context.Context, p *HealthzCheck
 	if err != nil {
 		return nil, err
 	}
+
+	collectionResults, err := c.checkCollectionMeta(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, collectionResults...)
 
 	return framework.NewPresetResultSet(framework.NewListResult[HealthzCheckReports](results), framework.FormatJSON), nil
 }
@@ -132,5 +140,64 @@ func (c *InstanceState) checkSegmentTarget(ctx context.Context) ([]*HealthzCheck
 			}
 		}
 	}
+	return results, nil
+}
+
+func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzCheckReport, error) {
+	collections, err := common.ListCollections(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*HealthzCheckReport
+	sessions, err := common.ListSessions(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	inMeta := lo.SliceToMap(collections, func(collection *models.Collection) (int64, struct{}) {
+		return collection.GetProto().GetID(), struct{}{}
+	})
+
+	for _, session := range sessions {
+		opts := []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+		}
+
+		conn, err := grpc.DialContext(ctx, session.Address, opts...)
+		if err != nil {
+			fmt.Printf("failed to connect %s(%d), err: %s\n", session.ServerName, session.ServerID, err.Error())
+			continue
+		}
+
+		if session.ServerName == "rootcoord" || session.ServerName == "mixcoord" {
+			clientv2 := rootcoordpb.NewRootCoordClient(conn)
+			resp, err := clientv2.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+				Base: &commonpb.MsgBase{
+					SourceID: -1,
+					TargetID: session.ServerID,
+					MsgType:  commonpb.MsgType_ShowCollections,
+				},
+			})
+			if err != nil {
+				fmt.Println(err.Error())
+				return nil, err
+			}
+			fmt.Printf("ImMeta cnt: %d, Response cnt: %d", len(inMeta), len(resp.GetCollectionIds()))
+			for idx, id := range resp.GetCollectionIds() {
+				if _, ok := inMeta[id]; !ok {
+					results = append(results, &HealthzCheckReport{
+						Msg: fmt.Sprintf("Collection %d not found in meta while loaded", id),
+						Extra: map[string]any{
+							"collection_id":   id,
+							"collection_name": resp.GetCollectionNames()[idx],
+						},
+					})
+				}
+			}
+		}
+	}
+
 	return results, nil
 }
