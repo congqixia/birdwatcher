@@ -68,6 +68,23 @@ func ListCollections(ctx context.Context, cli kv.MetaKV, basePath string, filter
 	return results, nil
 }
 
+func ListCollectionWithoutFields(ctx context.Context, cli kv.MetaKV, basePath string, filters ...func(*models.Collection) bool) ([]*models.Collection, error) {
+	prefixes := []string{
+		path.Join(basePath, CollectionMetaPrefix),
+		path.Join(basePath, DBCollectionMetaPrefix),
+	}
+	var results []*models.Collection
+	for _, prefix := range prefixes {
+		collections, err := ListObj2Models(ctx, cli, prefix, models.NewCollection, filters...)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, collections...)
+	}
+
+	return results, nil
+}
+
 // GetCollectionByIDVersion retruns collection info from etcd with provided version & id.
 func GetCollectionByIDVersion(ctx context.Context, cli kv.MetaKV, basePath string, collID int64) (*models.Collection, error) {
 	colls, err := ListCollections(ctx, cli, basePath, func(c *models.Collection) bool {

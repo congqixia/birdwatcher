@@ -145,7 +145,7 @@ func (c *InstanceState) checkSegmentTarget(ctx context.Context) ([]*HealthzCheck
 }
 
 func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzCheckReport, error) {
-	collections, err := common.ListCollections(ctx, c.client, c.basePath)
+	collections, err := common.ListCollectionWithoutFields(ctx, c.client, c.basePath)
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +193,9 @@ func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzChec
 					fmt.Println(err.Error())
 					return nil, err
 				}
-				fmt.Printf("DB %s, ImMeta cnt: %d, Response cnt: %d\n", db.GetProto().GetName(), len(lo.Filter(collections, func(collection *models.Collection, _ int) bool {
-					return collection.GetProto().GetDbId() == db.GetProto().GetId()
-				})), len(resp.GetCollectionIds()))
+				// fmt.Printf("DB %s, ImMeta cnt: %d, Response cnt: %d\n", db.GetProto().GetName(), len(lo.Filter(collections, func(collection *models.Collection, _ int) bool {
+				// return collection.GetProto().GetDbId() == db.GetProto().GetId()
+				// })), len(resp.GetCollectionIds()))
 				for idx, id := range resp.GetCollectionIds() {
 					if _, ok := inMeta[id]; !ok {
 						results = append(results, &HealthzCheckReport{
@@ -203,6 +203,8 @@ func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzChec
 							Extra: map[string]any{
 								"collection_id":   id,
 								"collection_name": resp.GetCollectionNames()[idx],
+								"database_id":     db.GetProto().GetId(),
+								"database_name":   db.GetProto().GetName(),
 							},
 						})
 					}
