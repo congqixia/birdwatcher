@@ -71,6 +71,12 @@ func (c *InstanceState) HealthzCheckCommand(ctx context.Context, p *HealthzCheck
 	}
 	results = append(results, collectionResults...)
 
+	collDiff, err := c.checkCollectionMetaDiffWithLoaded(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, collDiff...)
+
 	return framework.NewPresetResultSet(framework.NewListResult[HealthzCheckReports](results), framework.FormatJSON), nil
 }
 
@@ -210,6 +216,36 @@ func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzChec
 					}
 				}
 			}
+		}
+	}
+
+	return results, nil
+}
+
+func (c *InstanceState) checkCollectionMetaDiffWithLoaded(ctx context.Context) ([]*HealthzCheckReport, error) {
+	collections, err := common.ListCollections(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+	collectionLoaded, err := common.ListCollectionLoadedInfo(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	inMeta := lo.SliceToMap(collections, func(collection *models.Collection) (int64, struct{}) {
+		return collection.GetProto().GetID(), struct{}{}
+	})
+
+	var results []*HealthzCheckReport
+	for _, collection := range collectionLoaded {
+		if _, ok := inMeta[collection.GetProto().GetCollectionID()]; !ok {
+			results = append(results, &HealthzCheckReport{
+				Msg: fmt.Sprintf("Collection %d not found in meta while loaded", collection.GetProto().GetCollectionID()),
+				Extra: map[string]any{
+					"collection_id": collection.GetProto().GetCollectionID(),
+					"database_id":   collection.GetProto().GetDbID(),
+				},
+			})
 		}
 	}
 
