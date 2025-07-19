@@ -26,6 +26,7 @@ type CollectionInfoParam struct {
 	Path                string `name:"filePath" default:"" desc:"path to the collection info file"`
 	DatabaseID          int64  `name:"databaseID" default:"0" desc:"database ID to repair"`
 	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection ID to repair"`
+	CollectionName      string `name:"collectionName" default:"" desc:"collection name to repair"`
 	Run                 bool   `name:"run" default:"false" desc:"run the collection info repair command"`
 }
 
@@ -90,21 +91,48 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 		return item.CollectionID, item
 	})
 
-	collectionInfo, ok := id2info[p.CollectionID]
-	if !ok {
-		return fmt.Errorf("collection ID %d not found in the collection info file", p.CollectionID)
-	}
+	var collectionInfo *CollectionInfoModel
+	var dbInfo *models.Database
+	var ok bool
 
-	dbInfo, ok := name2db[collectionInfo.DbName]
-	if !ok {
-		return fmt.Errorf("collection dbname %s not found current instance", collectionInfo.DbName)
+	if p.Path != "" {
+		fmt.Println("Use backup metafield:", p.Path)
+		collectionInfo, ok = id2info[p.CollectionID]
+		if !ok {
+			return fmt.Errorf("collection ID %d not found in the collection info file", p.CollectionID)
+		}
+
+		dbInfo, ok = name2db[collectionInfo.DbName]
+		if !ok {
+			return fmt.Errorf("collection dbname %s not found current instance", collectionInfo.DbName)
+		}
+	} else {
+		fmt.Println("Use manual specified information")
+		if p.DatabaseID == 0 {
+			return fmt.Errorf("database ID must be specified when collection info file is not provided")
+		}
+		if p.CollectionName == "" {
+			return fmt.Errorf("collection name must be specified when collection info file is not provided")
+		}
+		dbInfo, ok = lo.Find(databases, func(db *models.Database) bool {
+			return db.GetProto().GetId() == p.DatabaseID
+		})
+		if !ok {
+			return fmt.Errorf("database ID %d not found current instance", p.DatabaseID)
+		}
+		collectionInfo = &CollectionInfoModel{
+			CollectionID:    p.CollectionID,
+			DbName:          dbInfo.GetProto().GetName(),
+			CollectionName:  p.CollectionName,
+			ConsitencyLevel: int32(commonpb.ConsistencyLevel_Bounded),
+		}
 	}
 
 	collPb := &etcdpb.CollectionInfo{
 		ID: collectionInfo.CollectionID,
 		Schema: &schemapb.CollectionSchema{
 			Name:   collectionInfo.CollectionName,
-			DbName: collectionInfo.DbName,
+			DbName: dbInfo.GetProto().GetName(),
 		},
 		ConsistencyLevel: commonpb.ConsistencyLevel(collectionInfo.ConsitencyLevel),
 		DbId:             dbInfo.GetProto().GetId(),
