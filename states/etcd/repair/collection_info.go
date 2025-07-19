@@ -27,6 +27,7 @@ type CollectionInfoParam struct {
 	DatabaseID          int64  `name:"databaseID" default:"0" desc:"database ID to repair"`
 	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection ID to repair"`
 	CollectionName      string `name:"collectionName" default:"" desc:"collection name to repair"`
+	EnableDynamic       bool   `name:"enableDynamic" default:"false" desc:"enable dynamic collection info repair, default is false"`
 	Run                 bool   `name:"run" default:"false" desc:"run the collection info repair command"`
 }
 
@@ -130,8 +131,9 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 	collPb := &etcdpb.CollectionInfo{
 		ID: collectionInfo.CollectionID,
 		Schema: &schemapb.CollectionSchema{
-			Name:   collectionInfo.CollectionName,
-			DbName: dbInfo.GetProto().GetName(),
+			Name:               collectionInfo.CollectionName,
+			DbName:             dbInfo.GetProto().GetName(),
+			EnableDynamicField: p.EnableDynamic,
 		},
 		ConsistencyLevel: commonpb.ConsistencyLevel(collectionInfo.ConsitencyLevel),
 		DbId:             dbInfo.GetProto().GetId(),
