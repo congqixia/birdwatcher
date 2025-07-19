@@ -94,3 +94,24 @@ func (s *dataCoordState) FlushCommand(ctx context.Context, p *FlushParam) error 
 		p.CollectionID, resp.GetStatus())
 	return nil
 }
+
+type DCRecoveryInfoParam struct {
+	framework.ParamBase `use:"recovery-info" desc:"get recovery info from datacoord for specified collectionID"`
+	CollectionID        int64 `name:"collectionID" default:"0" desc:"collection id to compact"`
+}
+
+func (s *dataCoordState) GetRecoveryInfoCommand(ctx context.Context, p *DCRecoveryInfoParam) error {
+	resp, err := s.client.GetRecoveryInfoV2(ctx, &datapb.GetRecoveryInfoRequestV2{
+		CollectionID: p.CollectionID,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "manual compact fail with collectionID:%d", p.CollectionID)
+	}
+	// fmt.Printf("manual flush done, collectionID:%d, rpc status:%v\n",
+	// 	p.CollectionID, resp.GetStatus())
+	fmt.Println(resp.String())
+	for _, info := range resp.GetChannels() {
+		fmt.Println(info.ChannelName, info.FlushedSegmentIds, info.UnflushedSegmentIds)
+	}
+	return nil
+}
