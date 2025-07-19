@@ -62,6 +62,17 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 		return strings.Contains(cp.GetChannelName(), fmt.Sprintf("%d", p.CollectionID))
 	})
 
+	fields, _, err := common.ListProtoObjects[schemapb.FieldSchema](ctx, c.client, path.Join(c.basePath, fmt.Sprintf("root-coord/fields/%d", p.CollectionID)))
+	if err != nil {
+		return fmt.Errorf("failed to list fields: %w", err)
+	}
+
+	hasDynamicFields := lo.ContainsBy(fields, func(field *schemapb.FieldSchema) bool {
+		return field.IsDynamic
+	})
+
+	fmt.Println("Dynamic Schema flag parsed from fields:", hasDynamicFields)
+
 	channels := make([]*models.Channel, len(checkpoints))
 	for _, cp := range checkpoints {
 		pchannel, _, version, err := ParseEntity(cp.GetChannelName())
