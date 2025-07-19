@@ -18,12 +18,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 )
 
 type CollectionInfoParam struct {
 	framework.ParamBase `use:"repair collection-info" desc:"repair collection info"`
 	Path                string `name:"filePath" default:"" desc:"path to the collection info file"`
-	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection ID to filter"`
+	DatabaseID          int64  `name:"databaseID" default:"0" desc:"database ID to repair"`
+	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection ID to repair"`
+	Run                 bool   `name:"run" default:"false" desc:"run the collection info repair command"`
 }
 
 type ListModel struct {
@@ -131,7 +134,22 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 		ShardsNum: int32(len(channels)),
 	}
 
-	fmt.Println("Collection Info:", collPb)
+	targetPath := path.Join(c.basePath, "root-coord", "database", "collection-info", fmt.Sprintf("%d", collPb.GetDbId()), fmt.Sprintf("%d", collPb.GetID()))
+
+	if p.Run {
+		bs, err := proto.Marshal(collPb)
+		if err != nil {
+			return fmt.Errorf("failed to marshal collection info: %w", err)
+		}
+		err = c.client.Save(ctx, targetPath, string(bs))
+		if err != nil {
+			return fmt.Errorf("failed to put collection info: %w", err)
+		}
+		fmt.Println("Collection Info repaired successfully.")
+	} else {
+		fmt.Println("Planned Path:", targetPath)
+		fmt.Println("Collection Info:", collPb)
+	}
 
 	return nil
 }
