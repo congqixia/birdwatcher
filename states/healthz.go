@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -159,6 +160,12 @@ func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzChec
 		return collection.GetProto().GetID(), struct{}{}
 	})
 
+	dbs, err := common.ListDatabase(ctx, c.client, c.basePath)
+	if err != nil {
+		fmt.Println("failed to list database info", err.Error())
+		return nil, errors.Wrap(err, "failed to list database info")
+	}
+
 	for _, session := range sessions {
 		opts := []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -173,27 +180,32 @@ func (c *InstanceState) checkCollectionMeta(ctx context.Context) ([]*HealthzChec
 
 		if session.ServerName == "rootcoord" || session.ServerName == "mixcoord" {
 			clientv2 := rootcoordpb.NewRootCoordClient(conn)
-			resp, err := clientv2.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: -1,
-					TargetID: session.ServerID,
-					MsgType:  commonpb.MsgType_ShowCollections,
-				},
-			})
-			if err != nil {
-				fmt.Println(err.Error())
-				return nil, err
-			}
-			fmt.Printf("ImMeta cnt: %d, Response cnt: %d", len(inMeta), len(resp.GetCollectionIds()))
-			for idx, id := range resp.GetCollectionIds() {
-				if _, ok := inMeta[id]; !ok {
-					results = append(results, &HealthzCheckReport{
-						Msg: fmt.Sprintf("Collection %d not found in meta while loaded", id),
-						Extra: map[string]any{
-							"collection_id":   id,
-							"collection_name": resp.GetCollectionNames()[idx],
-						},
-					})
+			for _, db := range dbs {
+				resp, err := clientv2.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+					Base: &commonpb.MsgBase{
+						SourceID: -1,
+						TargetID: session.ServerID,
+						MsgType:  commonpb.MsgType_ShowCollections,
+					},
+					DbName: db.GetProto().GetName(),
+				})
+				if err != nil {
+					fmt.Println(err.Error())
+					return nil, err
+				}
+				fmt.Printf("DB %s, ImMeta cnt: %d, Response cnt: %d\n", db.GetProto().GetName(), len(lo.Filter(collections, func(collection *models.Collection, _ int) bool {
+					return collection.GetProto().GetDbId() == db.GetProto().GetId()
+				})), len(resp.GetCollectionIds()))
+				for idx, id := range resp.GetCollectionIds() {
+					if _, ok := inMeta[id]; !ok {
+						results = append(results, &HealthzCheckReport{
+							Msg: fmt.Sprintf("Collection %d not found in meta while loaded", id),
+							Extra: map[string]any{
+								"collection_id":   id,
+								"collection_name": resp.GetCollectionNames()[idx],
+							},
+						})
+					}
 				}
 			}
 		}
