@@ -60,7 +60,7 @@ func (s *queryCoordState) BalanceSegmentCommand(ctx context.Context, p *BalanceS
 }
 
 type LoadParam struct {
-	framework.ParamBase `use:"balance-segment" desc:"balance segment"`
+	framework.ParamBase `use:"load collection" desc:"balance segment"`
 	CollectionID        int64 `name:"collection" default:"0"`
 	Refresh             bool  `name:"refresh" default:"false" desc:"whether to refresh the collection"`
 }
