@@ -282,7 +282,7 @@ func (c *InstanceState) checkCollectionMeatDiffWithPartition(ctx context.Context
 		_, ok := collectionSet[collectionID]
 		if !ok {
 			results = append(results, &HealthzCheckReport{
-				Msg: fmt.Sprintf("Collection %d not found in meta while loaded", collection.GetProto().GetCollectionID()),
+				Msg: fmt.Sprintf("Collection %d not found in meta while have partition(s)", collectionID),
 				Extra: map[string]any{
 					"collection_id": collectionID,
 				},
