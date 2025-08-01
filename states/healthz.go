@@ -77,6 +77,12 @@ func (c *InstanceState) HealthzCheckCommand(ctx context.Context, p *HealthzCheck
 	}
 	results = append(results, collDiff...)
 
+	coollPartDiff, err := c.checkCollectionMeatDiffWithPartition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, coollPartDiff...)
+
 	return framework.NewPresetResultSet(framework.NewListResult[HealthzCheckReports](results), framework.FormatJSON), nil
 }
 
@@ -244,6 +250,41 @@ func (c *InstanceState) checkCollectionMetaDiffWithLoaded(ctx context.Context) (
 				Extra: map[string]any{
 					"collection_id": collection.GetProto().GetCollectionID(),
 					"database_id":   collection.GetProto().GetDbID(),
+				},
+			})
+		}
+	}
+
+	return results, nil
+}
+
+func (c *InstanceState) checkCollectionMeatDiffWithPartition(ctx context.Context) ([]*HealthzCheckReport, error) {
+	collections, err := common.ListCollectionWithoutFields(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	partitions, err := common.ListAllPartitions(ctx, c.client, c.basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	groups := lo.GroupBy(partitions, func(partition *models.Partition) int64 {
+		return partition.GetProto().GetCollectionId()
+	})
+
+	collectionSet := lo.SliceToMap(collections, func(collection *models.Collection) (int64, struct{}) {
+		return collection.GetProto().GetID(), struct{}{}
+	})
+
+	var results []*HealthzCheckReport
+	for collectionID := range groups {
+		_, ok := collectionSet[collectionID]
+		if !ok {
+			results = append(results, &HealthzCheckReport{
+				Msg: fmt.Sprintf("Collection %d not found in meta while loaded", collection.GetProto().GetCollectionID()),
+				Extra: map[string]any{
+					"collection_id": collectionID,
 				},
 			})
 		}
