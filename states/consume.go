@@ -101,7 +101,7 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 				if err != nil {
 					fmt.Println(err.Error())
 				}
-				if p.ShardName == "" || v.GetShardName() == p.ShardName {
+				if v != nil && (p.ShardName == "" || v.GetShardName() == p.ShardName) {
 					if p.Detail {
 						fmt.Print(v)
 					} else {
@@ -120,6 +120,18 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 		}
 	}
 	return nil
+}
+
+func ParseInsertMsg(msgType commonpb.MsgType, payload []byte) (*msgpb.InsertRequest, error) {
+	if msgType != commonpb.MsgType_Insert {
+		return nil, errors.Newf("expected message type %s, got %s", commonpb.MsgType_Insert, msgType)
+	}
+	msg := &msgpb.InsertRequest{}
+	err := proto.Unmarshal(payload, msg)
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
 }
 
 func ParseMsg(msgType commonpb.MsgType, payload []byte) (interface {
