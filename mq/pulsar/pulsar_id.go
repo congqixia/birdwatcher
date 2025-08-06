@@ -2,9 +2,12 @@ package pulsar
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
+	"github.com/gogo/protobuf/proto"
 
 	"github.com/milvus-io/birdwatcher/mq/ifc"
 )
@@ -86,6 +89,40 @@ func msgIDToString(messageID pulsar.MessageID) string {
 }
 
 // StringToMsgID is used to convert a string to message ID
-func stringToMsgID(msgString string) (pulsar.MessageID, error) {
-	return pulsar.DeserializeMessageID([]byte(msgString))
+func StringToMsgID(msgString string) (ifc.MessageID, error) {
+	ids := strings.Split(msgString, ":")
+	if len(ids) != 2 {
+		return nil, errors.Newf("invalid manual id: %s", msgString)
+	}
+	ledgerID, err := strconv.ParseUint(ids[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	entryID, err := strconv.ParseUint(ids[1], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	msgID := newMessageIDOfPulsar(ledgerID, entryID, 0)
+	return DeserializePulsarMsgID(msgID.Serialize())
+}
+
+// newMessageIDOfPulsar only for test.
+func newMessageIDOfPulsar(ledgerID uint64, entryID uint64, batchIdx int32) pulsar.MessageID {
+	partitionIdx := int32(0)
+	id := &MessageIdData{
+		LedgerId:   &ledgerID,
+		EntryId:    &entryID,
+		BatchIndex: &batchIdx,
+		Partition:  &partitionIdx,
+	}
+
+	msg, err := proto.Marshal(id)
+	if err != nil {
+		panic(err)
+	}
+	msgID, err := pulsar.DeserializeMessageID(msg)
+	if err != nil {
+		panic(err)
+	}
+	return msgID
 }

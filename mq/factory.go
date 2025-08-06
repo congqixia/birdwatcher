@@ -22,9 +22,14 @@ func ParsePositionFromCheckpoint(mqType string, messageID []byte) (ifc.MessageID
 	}
 }
 
-func ParseManualMessageID(mqType string, manualID int64) (ifc.MessageID, error) {
+func ParseManualMessageID(mqType string, manualID string) (ifc.MessageID, error) {
 	// pulsar not supported yet
-	return nil, errors.Newf("not supported mq type: %s", mqType)
+	switch mqType {
+	case "pulsar":
+		return pulsar.StringToMsgID(manualID)
+	default:
+		return nil, errors.Newf("not supported mq type: %s", mqType)
+	}
 }
 
 func NewConsumer(mqType, address, channel string, config ifc.MqOption) (ifc.Consumer, error) {

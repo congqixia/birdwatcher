@@ -25,10 +25,19 @@ type ConsumeParam struct {
 	Topic               string `name:"topic" default:"" desc:"topic to consume"`
 	ShardName           string `name:"shard_name" default:"" desc:"shard name(vchannel name) to filter with"`
 	Detail              bool   `name:"detail" default:"false" desc:"print msg detail"`
-	ManualID            int64  `name:"manual_id" default:"0" desc:"manual id"`
+	ManualID            string `name:"manual-id" default:"" desc:"manual id"`
+	OutputFile          string `name:"output-file" default:"" desc:"output file"`
 }
 
 func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) error {
+	// of := os.Stdout
+	// if p.OutputFile != "" {
+	// 	var err error
+	// 	if of, err = os.OpenFile(p.OutputFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
+	// 		return err
+	// 	}
+	// }
+
 	var messageID ifc.MessageID
 	switch p.StartPosition {
 	case "cp":
