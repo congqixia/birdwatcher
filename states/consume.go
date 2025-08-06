@@ -94,7 +94,7 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 		proto.Unmarshal(msg.Payload(), &header)
 		msgType := header.GetBase().GetMsgType()
 		if msgType != commonpb.MsgType_TimeTick {
-			fmt.Printf("%s ", msgType)
+			// fmt.Printf("%s ", msgType)
 			switch msgType {
 			case commonpb.MsgType_Insert, commonpb.MsgType_Delete:
 				v, err := ParseMsg(header.GetBase().GetMsgType(), msg.Payload())
