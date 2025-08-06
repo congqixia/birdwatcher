@@ -83,6 +83,9 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 	}
 
 	for {
+		if ctx.Err() != nil {
+			break
+		}
 		msg, err := c.Consume()
 		if err != nil {
 			return err
