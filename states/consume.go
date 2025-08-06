@@ -114,7 +114,6 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 				}
 			default:
 			}
-			fmt.Println()
 		}
 		if eq, _ := msg.ID().Equal(latestID.Serialize()); eq {
 			break
