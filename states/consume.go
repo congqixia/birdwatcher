@@ -106,10 +106,10 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 			// fmt.Printf("%s ", msgType)
 			switch msgType {
 			case commonpb.MsgType_Insert, commonpb.MsgType_Delete:
-				v, err := ParseInsertMsg(header.GetBase().GetMsgType(), msg.Payload())
-				if err != nil {
-					fmt.Println(err.Error())
-				}
+				v, _ := ParseInsertMsg(header.GetBase().GetMsgType(), msg.Payload())
+				// if err != nil {
+				// 	fmt.Println(err.Error())
+				// }
 				if v != nil && (p.ShardName == "" || v.GetShardName() == p.ShardName) {
 					fmt.Println("timestamp", v.Base.GetTimestamp())
 					for _, fieldData := range v.GetFieldsData() {
