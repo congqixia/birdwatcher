@@ -120,7 +120,7 @@ func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string, opts ...LoadOp
 
 func (kv *etcdKV) CountWithPrefix(ctx context.Context, key string) (int64, error) {
 	key = joinPath(kv.rootPath, key)
-	resp, err := kv.client.Get(ctx, key, clientv3.WithCountOnly())
+	resp, err := kv.client.Get(ctx, key, clientv3.WithCountOnly(), clientv3.WithPrefix())
 	if err != nil {
 		return 0, err
 	}
