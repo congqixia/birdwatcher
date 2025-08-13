@@ -38,6 +38,7 @@ type ScanBinlogParams struct {
 	IncludeUnhealthy    bool     `name:"includeUnhealthy" default:"false" desc:"also check dropped segments"`
 	WorkerNum           int64    `name:"workerNum" default:"4" desc:"worker num"`
 	OutputLimit         int64    `name:"outputLimit" default:"10" desc:"output limit"`
+	DumpFile            string   `name:"dumpFile" default:""`
 }
 
 func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogParams) error {
@@ -107,7 +108,7 @@ func (s *InstanceState) ScanBinlogCommand(ctx context.Context, p *ScanBinlogPara
 	case "locate":
 		scanTask = tasks.NewLocateTask(p.OutputLimit, pkField)
 	case "dedup":
-		scanTask = tasks.NewDedupTask(p.OutputLimit, pkField)
+		scanTask = tasks.NewDedupTask(p.OutputLimit, pkField, p.DumpFile)
 	default:
 		return errors.Newf("unknown action: %s", p.Action)
 	}
