@@ -111,7 +111,8 @@ func (rs *CompactionTasks) Entities() any {
 }
 
 func printCompactionTaskSimple(sb *strings.Builder, task *models.CompactionTask) {
-	fmt.Fprintf(sb, "JobID: %d\tTaskID: %d\t Type:%s\t State:%s\t StartTime: %d\n", task.GetTriggerID(), task.GetPlanID(), task.GetType().String(), task.GetState().String(), task.GetStartTime())
+	startTime := time.Unix(task.GetStartTime(), 0)
+	fmt.Fprintf(sb, "JobID: %d\tTaskID: %d\t Type:%s\t State:%s\t StartTime: %v\n", task.GetTriggerID(), task.GetPlanID(), task.GetType().String(), task.GetState().String(), startTime)
 }
 
 func printCompactionTask(sb *strings.Builder, task *models.CompactionTask, detailSegmentIDs bool) {
