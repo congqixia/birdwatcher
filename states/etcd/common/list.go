@@ -143,12 +143,18 @@ func WalkObjWithPrefix[T any, P interface {
 	var cnt int
 	err := cli.WalkWithPrefix(ctx, prefix, paginationSize, func(key, value []byte) error {
 		var elem T
-		// info := P(&elem)
 		info := P(&elem)
 		err := proto.Unmarshal(value, info)
 		if err != nil {
 			fmt.Println(err.Error())
 			return nil
+		}
+
+		m := convert(info, string(key))
+		for _, filter := range filters {
+			if !filter(m) {
+				return nil
+			}
 		}
 		result = append(result, convert(info, string(key)))
 		cnt++

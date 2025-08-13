@@ -39,6 +39,10 @@ func (c *FileAuditKV) LoadWithPrefix(ctx context.Context, key string, opts ...Lo
 	return c.cli.LoadWithPrefix(ctx, key, opts...)
 }
 
+func (c *FileAuditKV) CountWithPrefix(ctx context.Context, key string) (int64, error) {
+	return c.cli.CountWithPrefix(ctx, key)
+}
+
 func (c *FileAuditKV) Save(ctx context.Context, key, value string) error {
 	c.writeHeader(models.AuditOpType_OpPut, 2)
 	err := c.cli.Save(ctx, key, value)

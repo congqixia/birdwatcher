@@ -45,6 +45,7 @@ var EmptyValueByte = []byte(EmptyValueString)
 type MetaKV interface {
 	Load(ctx context.Context, key string, opts ...LoadOption) (string, error)
 	LoadWithPrefix(ctx context.Context, key string, opts ...LoadOption) ([]string, []string, error)
+	CountWithPrefix(ctx context.Context, key string) (int64, error)
 	Save(ctx context.Context, key, value string) error
 	MultiSave(ctx context.Context, keys, values []string) error
 	Remove(ctx context.Context, key string) error
@@ -115,6 +116,15 @@ func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string, opts ...LoadOp
 		values = append(values, string(kv.Value))
 	}
 	return keys, values, nil
+}
+
+func (kv *etcdKV) CountWithPrefix(ctx context.Context, key string) (int64, error) {
+	key = joinPath(kv.rootPath, key)
+	resp, err := kv.client.Get(ctx, key, clientv3.WithCountOnly())
+	if err != nil {
+		return 0, err
+	}
+	return resp.Count, nil
 }
 
 // Save saves the key-value pair.
@@ -434,6 +444,10 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string, opts ...Lo
 		}
 	}
 	return keys, values, nil
+}
+
+func (kv *txnTiKV) CountWithPrefix(ctx context.Context, prefix string) (int64, error) {
+	return -1, errors.New("not implemented")
 }
 
 // Save saves the input key-value pair.

@@ -9,8 +9,12 @@ import (
 )
 
 // ListCompactionTask returns compaction task information as provided filters.
-func ListCompactionTask(ctx context.Context, cli kv.MetaKV, basePath string, filters ...func(task *models.CompactionTask) bool) ([]*models.CompactionTask, error) {
+func ListCompactionTask(ctx context.Context, cli kv.MetaKV, basePath string, filters ...func(task *models.CompactionTask) bool) ([]*models.CompactionTask, int64, error) {
 	prefix := path.Join(basePath, DCPrefix, CompactionTaskPrefix) + "/"
-	// return ListObj2Models(ctx, cli, prefix, models.NewCompactionTask, filters...)
-	return WalkObjWithPrefix(ctx, cli, prefix, 100, 30, models.NewCompactionTask, filters...)
+	total, err := cli.CountWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, -1, err
+	}
+	tasks, err := WalkObjWithPrefix(ctx, cli, prefix, 100, 30, models.NewCompactionTask, filters...)
+	return tasks, total, err
 }

@@ -36,8 +36,8 @@ func (c *ComponentShow) CompactionTaskCommand(ctx context.Context, p *Compaction
 
 	// perform get by id to accelerate
 
-	compactionTasks, err = common.ListCompactionTask(ctx, c.client, c.metaPath, func(task *models.CompactionTask) bool {
-		total++
+	compactionTasks, total, err = common.ListCompactionTask(ctx, c.client, c.metaPath, func(task *models.CompactionTask) bool {
+		// total++
 		if p.CollectionName != "" && task.GetSchema().GetName() != p.CollectionName {
 			return false
 		}
