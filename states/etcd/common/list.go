@@ -133,3 +133,34 @@ func ListObj2Models[T any, proto interface {
 		return result, true
 	}), nil
 }
+
+func WalkObjWithPrefix[T any, P interface {
+	*T
+	protoreflect.ProtoMessage
+}, M any](ctx context.Context, cli kv.MetaKV, prefix string, paginationSize int, limit int, convert func(P, string) *M, filters ...func(*M) bool) ([]*M, error) {
+
+	var result []*M
+	var cnt int
+	err := cli.WalkWithPrefix(ctx, prefix, paginationSize, func(key, value []byte) error {
+		var elem T
+		// info := P(&elem)
+		info := P(&elem)
+		err := proto.Unmarshal(value, info)
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil
+		}
+		result = append(result, convert(info, string(key)))
+		cnt++
+		if limit > 0 && cnt >= limit {
+			return ErrReachMaxNumOfWalkSegment
+		}
+		return nil
+	})
+
+	if err != nil && err != ErrReachMaxNumOfWalkSegment {
+		return nil, err
+	}
+
+	return result, nil
+}
