@@ -160,7 +160,7 @@ func (s *InstanceState) GetDistributionCommand(ctx context.Context, p *GetDistri
 				if segmentInfo != nil {
 					rc = segmentInfo.NumOfRows
 				}
-				fmt.Printf("SegmentID: %d CollectionID: %d Channel: %s, NumOfRows %d\n", segment.GetID(), segment.GetCollection(), segment.GetChannel(), rc)
+				fmt.Printf("SegmentID: %d CollectionID: %d Channel: %s, NumOfRows %d, indexes: %v\n", segment.GetID(), segment.GetCollection(), segment.GetChannel(), rc, segment.FieldJsonIndexStats)
 				sealedNum++
 				collRowCount += rc
 			}
