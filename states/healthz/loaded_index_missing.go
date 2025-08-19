@@ -128,6 +128,13 @@ func (i *LoadedIndexMissing) Check(ctx context.Context, client metakv.MetaKV, ba
 				results = append(results, &HealthzCheckReport{
 					Item: i.Name(),
 					Msg:  fmt.Sprintf("segment %d has %d index, but querynode reports %d", segmentInfo.GetID(), len(idxes), len(segmentInfo.GetIndexInfo())),
+					Extra: map[string]any{
+						"segment_id":     segmentInfo.GetID(),
+						"loaded_indexes": segmentInfo.GetIndexInfo(),
+						"expected_indexes": lo.Map(idxes, func(idx *models.SegmentIndex, _ int) int64 {
+							return idx.GetProto().GetIndexID()
+						}),
+					},
 				})
 			}
 		}
