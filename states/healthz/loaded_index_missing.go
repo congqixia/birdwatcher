@@ -31,6 +31,16 @@ func newLoadedIndexMissing() *LoadedIndexMissing {
 
 func (i *LoadedIndexMissing) Check(ctx context.Context, client metakv.MetaKV, basePath string) ([]*HealthzCheckReport, error) {
 
+	// list segment info to get row count information
+	segments, err := common.ListSegments(ctx, client, basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	id2Segment := lo.SliceToMap(segments, func(s *models.Segment) (int64, *models.Segment) {
+		return s.ID, s
+	})
+
 	segmentIndexes, err := common.ListSegmentIndex(ctx, client, basePath)
 	if err != nil {
 		return nil, err
@@ -123,7 +133,13 @@ func (i *LoadedIndexMissing) Check(ctx context.Context, client metakv.MetaKV, ba
 		}
 		resp := result.resp
 		for _, segmentInfo := range resp.GetSegments() {
+			segment, ok := id2Segment[segmentInfo.GetID()]
+			if !ok || segment.NumOfRows < 2048 {
+				continue
+			}
+
 			idxes := seg2Idx[segmentInfo.GetID()]
+
 			if len(idxes) != len(segmentInfo.GetIndexInfo()) {
 				results = append(results, &HealthzCheckReport{
 					Item: i.Name(),
