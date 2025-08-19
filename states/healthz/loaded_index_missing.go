@@ -127,7 +127,7 @@ func (i *LoadedIndexMissing) Check(ctx context.Context, client metakv.MetaKV, ba
 			if len(idxes) != len(segmentInfo.GetIndexInfo()) {
 				results = append(results, &HealthzCheckReport{
 					Item: i.Name(),
-					Msg:  fmt.Sprintf("segment %d has %d index, but querynode reports %d", segmentInfo.GetID(), len(idxes), len(segmentInfo.GetIndexInfo())),
+					Msg:  fmt.Sprintf("segment %d has %d index, but querynode(%d) reports %d", segmentInfo.GetID(), len(idxes), result.id, len(segmentInfo.GetIndexInfo())),
 					Extra: map[string]any{
 						"segment_id":     segmentInfo.GetID(),
 						"loaded_indexes": segmentInfo.GetIndexInfo(),
