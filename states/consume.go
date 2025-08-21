@@ -107,23 +107,19 @@ func (s *InstanceState) ConsumeCommand(ctx context.Context, p *ConsumeParam) err
 			switch msgType {
 			case commonpb.MsgType_Insert, commonpb.MsgType_Delete:
 				v, _ := ParseInsertMsg(header.GetBase().GetMsgType(), msg.Payload())
-				// if err != nil {
-				// 	fmt.Println(err.Error())
-				// }
 				if v != nil && (p.ShardName == "" || v.GetShardName() == p.ShardName) {
-					fmt.Println("timestamp", v.Base.GetTimestamp())
+					t, _ := ParseTS(v.Base.GetTimestamp())
+					fmt.Println("timestamp", v.Base.GetTimestamp(), " time: ", t)
+					fmt.Println("num of rows:", v.GetNumRows())
 					for _, fieldData := range v.GetFieldsData() {
 						fmt.Println("Field ID:", fieldData.GetFieldId(), "Name:", fieldData.GetFieldName(), "Type:", fieldData.GetType())
 					}
-					// if p.Detail {
-					// 	fmt.Print(v)
-					// } else {
-					// 	fmt.Print(v.GetShardName())
-					// 	err := ValidateMsg(msgType, msg.Payload())
-					// 	if err != nil {
-					// 		fmt.Println(err.Error())
-					// 	}
-					// }
+					if p.Detail {
+						err := ValidateMsg(msgType, msg.Payload())
+						if err != nil {
+							fmt.Println(err.Error())
+						}
+					}
 				}
 			default:
 			}
@@ -176,6 +172,10 @@ func ValidateMsg(msgType commonpb.MsgType, payload []byte) error {
 		proto.Unmarshal(payload, msg)
 		for _, fieldData := range msg.GetFieldsData() {
 			msgType := fieldData.GetType()
+			vl := len(fieldData.GetValidData())
+			if vl > 0 && vl != int(msg.GetNumRows()) {
+				return errors.Newf("Field %d(%s) len = %d, datatype %v mismatch num validate: %d", fieldData.GetFieldId(), fieldData.GetFieldName(), vl, msgType, msg.GetNumRows())
+			}
 			switch msgType {
 			case schemapb.DataType_Int64:
 				l := len(fieldData.GetScalars().GetLongData().GetData())
