@@ -292,6 +292,11 @@ func PrintSegmentInfo(info *models.Segment, detailBinlog bool) {
 		}
 		fmt.Println("=== Segment Total Deltalog Size: ", hrSize(deltaLogSize))
 		fmt.Println("=== Segment Total Deltalog Mem Size: ", hrSize(memSize))
+
+		for fieldID, textInfo := range info.GetTextStatsLogs() {
+			fmt.Println("FieldID: ", fieldID)
+			fmt.Println(textInfo)
+		}
 	}
 
 	fmt.Println("================================================================================")
