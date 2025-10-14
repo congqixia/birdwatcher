@@ -52,7 +52,7 @@ func GetRootCoordState(client rootcoordpb.RootCoordClient, conn *grpc.ClientConn
 }
 
 type AlterFieldParam struct {
-	framework.ParamBase `use:"balance-segment" desc:"balance segment"`
+	framework.ParamBase `use:"alter-field" desc:"alter collection field"`
 	CollectionName      string `name:"collectionName" default:"" desc:"collection name to balance"`
 	DbName              string `name:"dbName" default:""`
 	FieldName           string `name:"fieldName" default:""`
