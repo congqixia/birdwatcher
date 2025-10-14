@@ -8,6 +8,8 @@ import (
 
 	"github.com/milvus-io/birdwatcher/framework"
 	"github.com/milvus-io/birdwatcher/models"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 )
 
@@ -47,4 +49,33 @@ func GetRootCoordState(client rootcoordpb.RootCoordClient, conn *grpc.ClientConn
 	state.SetupCommands()
 
 	return state
+}
+
+type AlterFieldParam struct {
+	framework.ParamBase `use:"balance-segment" desc:"balance segment"`
+	CollectionName      string `name:"collectionName" default:"" desc:"collection name to balance"`
+	DbName              string `name:"dbName" default:""`
+	FieldName           string `name:"fieldName" default:""`
+	Key                 string `name:"key" default:""`
+	Value               string `name:"value" default:""`
+}
+
+func (s *rootCoordState) AlterFieldCommand(ctx context.Context, p *AlterFieldParam) error {
+	resp, err := s.client.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_AlterCollectionField,
+			TargetID: s.session.ServerID,
+		},
+		DbName:         p.DbName,
+		CollectionName: p.CollectionName,
+		FieldName:      p.FieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: p.Key, Value: p.Value},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp)
+	return nil
 }
