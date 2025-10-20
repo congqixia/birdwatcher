@@ -87,7 +87,7 @@ type RemoveCollectionAttributeParam struct {
 	Keys                []string `name:"keys"`
 }
 
-func (s *rootCoordState) RemoveCollectionAttribute(ctx context.Context, p *RemoveCollectionAttributeParam) error {
+func (s *rootCoordState) RemoveCollectionAttributeCommand(ctx context.Context, p *RemoveCollectionAttributeParam) error {
 	resp, err := s.client.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_AlterCollection,
