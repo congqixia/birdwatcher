@@ -79,3 +79,27 @@ func (s *rootCoordState) AlterFieldCommand(ctx context.Context, p *AlterFieldPar
 	fmt.Println(resp)
 	return nil
 }
+
+type RemoveCollectionAttributeParam struct {
+	framework.ParamBase `use:"remove collection-attr" desc:"remove collection attribute"`
+	DbName              string   `name:"dbName" default:""`
+	CollectionName      string   `name:"collectionName" default:""`
+	Keys                []string `name:"keys"`
+}
+
+func (s *rootCoordState) RemoveCollectionAttribute(ctx context.Context, p *RemoveCollectionAttributeParam) error {
+	resp, err := s.client.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_AlterCollection,
+			TargetID: s.session.ServerID,
+		},
+		DbName:         p.DbName,
+		CollectionName: p.CollectionName,
+		DeleteKeys:     p.Keys,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp)
+	return nil
+}
