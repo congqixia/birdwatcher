@@ -518,3 +518,29 @@ func (s *queryCoordState) TransferChannelCommand(ctx context.Context, p *Transfe
 	}
 	return nil
 }
+
+type ReleaseCollectionParam struct {
+	framework.ParamBase `use:"release collection" desc:"release collection"`
+	CollectionID        int64 `name:"collection" desc:"collection id to release"`
+}
+
+func (s *queryCoordState) ReleaseCollectionCommand(ctx context.Context, p *ReleaseCollectionParam) error {
+	req := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			TargetID: s.session.ServerID,
+			SourceID: -1,
+		},
+		CollectionID: p.CollectionID,
+	}
+
+	resp, err := s.client.ReleaseCollection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to release collection: %w", err)
+	}
+	if resp.ErrorCode != commonpb.ErrorCode_Success {
+		return fmt.Errorf("release collection failed: %s", resp.Reason)
+	}
+
+	fmt.Printf("✅ All collections released successfully\n")
+	return nil
+}
