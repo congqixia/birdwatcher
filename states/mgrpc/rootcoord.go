@@ -103,3 +103,28 @@ func (s *rootCoordState) RemoveCollectionAttributeCommand(ctx context.Context, p
 	fmt.Println(resp)
 	return nil
 }
+
+type SetDatabasePropertyParam struct {
+	framework.ParamBase `use:"set-database-property" desc:"set database property"`
+	DbName              string `name:"dbName" default:""`
+	Key                 string `name:"key" default:""`
+	Value               string `name:"value" default:""`
+}
+
+func (s *rootCoordState) SetDatabasePropertyCommand(ctx context.Context, p *SetDatabasePropertyParam) error {
+	resp, err := s.client.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_AlterDatabase,
+			TargetID: s.session.ServerID,
+		},
+		DbName: p.DbName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: p.Key, Value: p.Value},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp)
+	return nil
+}
