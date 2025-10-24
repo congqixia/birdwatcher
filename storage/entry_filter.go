@@ -54,6 +54,7 @@ func (f *ExprFilter) Match(pk common.PrimaryKey, ts int64, values map[int64]any)
 
 	for key, value := range f.extra {
 		env[key] = value
+		env["$"+key] = value
 	}
 
 	output, err := expr.Run(f.program, env)
