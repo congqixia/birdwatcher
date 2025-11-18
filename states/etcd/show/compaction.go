@@ -145,6 +145,8 @@ func printCompactionTask(sb *strings.Builder, task *models.CompactionTask, detai
 		fmt.Fprintf(sb, "Total Rows :%d\n", task.GetTotalRows())
 	}
 
+	fmt.Fprintf(sb, "Pos: %v\n", task.GetPos())
+
 	if detailSegmentIDs {
 		fmt.Fprintf(sb, "Input Segments:%v\n", task.GetInputSegments())
 		fmt.Fprintf(sb, "Target Segments:%v\n", task.GetResultSegments())
