@@ -297,7 +297,18 @@ func (s *InstanceState) ProbePKCommand(ctx context.Context, p *ProbePKParam) err
 			}
 			fmt.Printf("PK %s found on segment %d\n", p.PK, segInfo.GetID())
 			for _, fd := range result.GetFieldsData() {
-				fmt.Printf("Field %s, value: %v\n", fieldIDName[fd.GetFieldId()], fd.GetField())
+				if spv := fd.GetVectors().GetSparseFloatVector(); spv != nil {
+					fmt.Printf("Field %s(SparseFloatVector)]")
+					for _, bs := range spv.GetContents() {
+						result, err := deserializeInt32Float32Pairs(bs)
+						if err != nil {
+							fmt.Println("failed to deserde spv, error: ", err.Error())
+						}
+						fmt.Println("Parsed spv: ", result)
+					}
+				} else {
+					fmt.Printf("Field %s, value: %v\n", fieldIDName[fd.GetFieldId()], fd.GetField())
+				}
 				fmt.Printf("Field %s, valid data: %v\n", fieldIDName[fd.GetFieldId()], fd.GetValidData())
 			}
 		}
@@ -580,6 +591,25 @@ func vector2PlaceholderGroupBytes[T interface {
 
 	bs, _ := proto.Marshal(phg)
 	return bs
+}
+
+type Int32Float32Pair struct {
+	Index int32
+	Value float32
+}
+
+func deserializeInt32Float32Pairs(data []byte) ([]Int32Float32Pair, error) {
+	const pairSize = 8 // 4 bytes int32 + 4 bytes float32
+	if len(data)%pairSize != 0 {
+		return nil, fmt.Errorf("data length %d is not a multiple of %d", len(data), pairSize)
+	}
+	result := make([]Int32Float32Pair, 0, len(data)/pairSize)
+	for i := 0; i < len(data); i += pairSize {
+		idx := int32(binary.LittleEndian.Uint32(data[i : i+4]))
+		val := math.Float32frombits(binary.LittleEndian.Uint32(data[i+4 : i+8]))
+		result = append(result, Int32Float32Pair{Index: idx, Value: val})
+	}
+	return result, nil
 }
 
 func vector2Placeholder[T interface {
