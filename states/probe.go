@@ -594,7 +594,7 @@ func vector2PlaceholderGroupBytes[T interface {
 }
 
 type Int32Float32Pair struct {
-	Index int32
+	Index uint32
 	Value float32
 }
 
@@ -605,7 +605,7 @@ func deserializeInt32Float32Pairs(data []byte) ([]Int32Float32Pair, error) {
 	}
 	result := make([]Int32Float32Pair, 0, len(data)/pairSize)
 	for i := 0; i < len(data); i += pairSize {
-		idx := int32(binary.LittleEndian.Uint32(data[i : i+4]))
+		idx := binary.LittleEndian.Uint32(data[i : i+4])
 		val := math.Float32frombits(binary.LittleEndian.Uint32(data[i+4 : i+8]))
 		result = append(result, Int32Float32Pair{Index: idx, Value: val})
 	}
