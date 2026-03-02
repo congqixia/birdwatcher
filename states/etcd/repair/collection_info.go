@@ -146,6 +146,7 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 			DbName:             dbInfo.GetProto().GetName(),
 			EnableDynamicField: p.EnableDynamic || hasDynamicFields,
 			Description:        p.Description,
+			Version:            1,
 		},
 		ConsistencyLevel: commonpb.ConsistencyLevel(collectionInfo.ConsitencyLevel),
 		DbId:             dbInfo.GetProto().GetId(),
@@ -172,7 +173,9 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 				Data: channel.StartPosition.MsgID,
 			}
 		}),
-		ShardsNum: int32(len(channels)),
+		ShardsNum:       int32(len(channels)),
+		CreateTime:      464636234257137670,
+		UpdateTimestamp: 464636234257137670,
 	}
 
 	targetPath := path.Join(c.basePath, "root-coord", "database", "collection-info", fmt.Sprintf("%d", collPb.GetDbId()), fmt.Sprintf("%d", collPb.GetID()))
