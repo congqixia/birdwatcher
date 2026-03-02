@@ -99,7 +99,7 @@ func (s *InstanceState) SetupCommands() {
 		etcd.DownloadCommand(cli, basePath),
 	)
 
-	// cmd.AddCommand(etcd.RawCommands(cli)...)
+	cmd.AddCommand(etcd.RawCommands(cli)...)
 
 	s.UpdateState(cmd, s, s.SetupCommands)
 }

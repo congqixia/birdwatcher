@@ -91,7 +91,36 @@ func RawCommands(cli kv.MetaKV) []*cobra.Command {
 	}
 
 	cmd.Flags().Bool("withValue", false, "print values")
-	return []*cobra.Command{cmd}
+
+	removeCmd := &cobra.Command{
+		Use:   "etcd-rm",
+		Short: "equivalent to etcd rm",
+		Run: func(cmd *cobra.Command, args []string) {
+			run, err := cmd.Flags().GetBool("run")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			var options []kv.LoadOption
+			for _, arg := range args {
+				fmt.Println("remove with", arg)
+				val, err := cli.Load(context.Background(), arg, options...)
+				if err != nil {
+					fmt.Println(err.Error())
+					continue
+				}
+				fmt.Printf("Value: %s found --- ", val)
+				if run {
+					cli.Remove(context.Background(), arg)
+					fmt.Printf("Removed\n")
+				} else {
+					fmt.Println("Dry run")
+				}
+			}
+		},
+	}
+	removeCmd.Flags().Bool("run", false, "run")
+	return []*cobra.Command{cmd, removeCmd}
 }
 
 func DownloadCommand(cli kv.MetaKV, basePath string) *cobra.Command {
