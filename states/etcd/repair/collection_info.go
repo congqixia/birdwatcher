@@ -29,6 +29,7 @@ type CollectionInfoParam struct {
 	CollectionID             int64  `name:"collectionID" default:"0" desc:"collection ID to repair"`
 	CollectionName           string `name:"collectionName" default:"" desc:"collection name to repair"`
 	EnableDynamic            bool   `name:"enableDynamic" default:"false" desc:"enable dynamic collection info repair, default is false"`
+	Description              string `name:"desc" default:"" desc:"description"`
 }
 
 type ListModel struct {
@@ -144,6 +145,7 @@ func (c *ComponentRepair) CollectionInfoCommand(ctx context.Context, p *Collecti
 			Name:               collectionInfo.CollectionName,
 			DbName:             dbInfo.GetProto().GetName(),
 			EnableDynamicField: p.EnableDynamic || hasDynamicFields,
+			Description:        p.Description,
 		},
 		ConsistencyLevel: commonpb.ConsistencyLevel(collectionInfo.ConsitencyLevel),
 		DbId:             dbInfo.GetProto().GetId(),

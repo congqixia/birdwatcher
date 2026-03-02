@@ -236,6 +236,7 @@ func printCollection(sb *strings.Builder, info *models.Collection) {
 	fmt.Fprintf(sb, "Collection State: %s\tCreate Time: %s\n", collection.State.String(), createTime.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(sb, "Update Time: %s\tUpdate timestamp: %d\n", updateTime.Format("2006-01-02 15:04:05"), collection.UpdateTimestamp)
 	fmt.Fprintf(sb, "Schema Version: %d\n", collection.Schema.Version)
+	fmt.Fprintf(sb, "Description: %s\n", collection.GetSchema().GetDescription())
 	fmt.Fprintf(sb, "Fields:\n")
 	fields := collection.Schema.Fields
 	sort.Slice(fields, func(i, j int) bool {
