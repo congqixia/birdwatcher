@@ -301,6 +301,10 @@ func printCollection(sb *strings.Builder, info *models.Collection) {
 		fmt.Fprintf(sb, " - Struct Field ID: %d \t Field Name: %s\n", structField.FieldID, structField.Name)
 		for _, field := range structField.Fields {
 			fmt.Fprintf(sb, "\t - Field ID: %d \t Field Name: %s \t Field Type: %s\n", field.FieldID, field.Name, field.DataType.String())
+			// type params
+			for _, kv := range field.TypeParams {
+				fmt.Fprintf(sb, "\t - Type Param %s: %s\n", kv.Key, kv.Value)
+			}
 		}
 	}
 
