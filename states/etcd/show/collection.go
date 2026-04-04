@@ -26,6 +26,7 @@ type CollectionParam struct {
 	DatabaseID             int64  `name:"dbid" default:"-1" desc:"database id to filter"`
 	State                  string `name:"state" default:"" desc:"collection state to filter"`
 	WithPropertyKey        string `name:"propertyKey" default:"" desc:"collection property to filter"`
+	HasStructArray         bool   `name:"hasStructArray" default:"false" desc:"filter collections with struct array fields"`
 }
 
 func (c *ComponentShow) CollectionCommand(ctx context.Context, p *CollectionParam) (*framework.PresetResultSet, error) {
@@ -63,6 +64,10 @@ func (c *ComponentShow) CollectionCommand(ctx context.Context, p *CollectionPara
 				if !found {
 					return false
 				}
+			}
+
+			if p.HasStructArray && len(coll.GetSchema().GetStructArrayFields()) == 0 {
+				return false
 			}
 
 			total++
