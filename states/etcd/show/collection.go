@@ -77,7 +77,7 @@ func (c *ComponentShow) CollectionCommand(ctx context.Context, p *CollectionPara
 	}
 
 	collections = lo.Filter(collections, func(c *models.Collection, _ int) bool {
-		return len(c.GetProto().GetSchema().GetStructArrayFields()) > 0
+		return !p.HasStructArray || len(c.GetProto().GetSchema().GetStructArrayFields()) > 0
 	})
 
 	if err != nil {
