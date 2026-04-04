@@ -67,10 +67,6 @@ func (c *ComponentShow) CollectionCommand(ctx context.Context, p *CollectionPara
 				}
 			}
 
-			if p.HasStructArray && len(coll.GetSchema().GetStructArrayFields()) == 0 {
-				return false
-			}
-
 			total++
 			return true
 		})
