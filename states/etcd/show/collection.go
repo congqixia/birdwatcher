@@ -8,6 +8,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/birdwatcher/framework"
 	"github.com/milvus-io/birdwatcher/models"
@@ -74,6 +75,10 @@ func (c *ComponentShow) CollectionCommand(ctx context.Context, p *CollectionPara
 			return true
 		})
 	}
+
+	collections = lo.Filter(collections, func(c *models.Collection, _ int) bool {
+		return len(c.GetProto().GetSchema().GetStructArrayFields()) > 0
+	})
 
 	if err != nil {
 		return nil, err
