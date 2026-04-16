@@ -3,12 +3,14 @@ package mgrpc
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/birdwatcher/framework"
 	"github.com/milvus-io/birdwatcher/models"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
@@ -92,5 +94,56 @@ func (s *dataCoordState) FlushCommand(ctx context.Context, p *FlushParam) error 
 	}
 	fmt.Printf("manual flush done, collectionID:%d, rpc status:%v\n",
 		p.CollectionID, resp.GetStatus())
+	return nil
+}
+
+type PauseGCParam struct {
+	framework.ParamBase `use:"pause gc" desc:"pause garbage collection"`
+	Duration            int64  `name:"duration" default:"600" desc:"pause duration in seconds"`
+	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection id to pause gc, 0 means all collections"`
+	Ticket              string `name:"ticket" default:"" desc:"ticket to identify the pause request"`
+}
+
+func (s *dataCoordState) PauseGCCommand(ctx context.Context, p *PauseGCParam) error {
+	if p.Duration <= 0 {
+		return errors.New("duration must be greater than 0")
+	}
+	params := []*commonpb.KeyValuePair{
+		{Key: "duration", Value: strconv.FormatInt(p.Duration, 10)},
+		{Key: "collection_id", Value: strconv.FormatInt(p.CollectionID, 10)},
+		{Key: "ticket", Value: p.Ticket},
+	}
+	status, err := s.client.GcControl(ctx, &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params:  params,
+	})
+	if err != nil {
+		return errors.Wrap(err, "pause gc fail")
+	}
+	fmt.Printf("pause gc done, duration:%ds, collectionID:%d, ticket:%q, rpc status:%v\n",
+		p.Duration, p.CollectionID, p.Ticket, status)
+	return nil
+}
+
+type ResumeGCParam struct {
+	framework.ParamBase `use:"resume gc" desc:"resume garbage collection"`
+	CollectionID        int64  `name:"collectionID" default:"0" desc:"collection id to resume gc, 0 means all collections"`
+	Ticket              string `name:"ticket" default:"" desc:"ticket to identify the resume request"`
+}
+
+func (s *dataCoordState) ResumeGCCommand(ctx context.Context, p *ResumeGCParam) error {
+	params := []*commonpb.KeyValuePair{
+		{Key: "collection_id", Value: strconv.FormatInt(p.CollectionID, 10)},
+		{Key: "ticket", Value: p.Ticket},
+	}
+	status, err := s.client.GcControl(ctx, &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Resume,
+		Params:  params,
+	})
+	if err != nil {
+		return errors.Wrap(err, "resume gc fail")
+	}
+	fmt.Printf("resume gc done, collectionID:%d, ticket:%q, rpc status:%v\n",
+		p.CollectionID, p.Ticket, status)
 	return nil
 }
