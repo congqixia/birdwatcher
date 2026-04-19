@@ -28,6 +28,7 @@ type InspectParquetParam struct {
 	FieldID             int64  `name:"field" default:"0" desc:"only inspect binlogs of this field ID (0 means all fields)"`
 	MetadataOnly        bool   `name:"metadataOnly" default:"true" desc:"print metadata only; set to false to also sample rows"`
 	SampleRows          int64  `name:"sampleRows" default:"10" desc:"number of rows to sample when metadataOnly=false"`
+	ShowRowGroups       bool   `name:"showRowGroups" default:"false" desc:"print per-row-group statistics"`
 	MinioAddress        string `name:"minioAddr" default:"" desc:"override minio address"`
 	SkipBucketCheck     bool   `name:"skipBucketCheck" default:"false" desc:"skip bucket existence check"`
 }
@@ -61,7 +62,7 @@ func (s *InstanceState) inspectLocalParquet(ctx context.Context, p *InspectParqu
 	}
 	defer pqReader.Close()
 
-	return printParquetFile(ctx, pqReader, p.FilePath, p.MetadataOnly, p.SampleRows)
+	return printParquetFile(ctx, pqReader, p.FilePath, p.MetadataOnly, p.SampleRows, p.ShowRowGroups)
 }
 
 func (s *InstanceState) inspectSegmentParquet(ctx context.Context, p *InspectParquetParam) error {
@@ -94,7 +95,7 @@ func (s *InstanceState) inspectSegmentParquet(ctx context.Context, p *InspectPar
 		for _, binlog := range fieldBinlog.Binlogs {
 			logPath := strings.ReplaceAll(binlog.LogPath, "ROOT_PATH", rootPath)
 			fmt.Printf("\n===== Field %d | %s =====\n", fieldBinlog.FieldID, logPath)
-			if err := inspectRemoteBinlog(ctx, minioClient, bucketName, logPath, segment.StorageVersion, p.MetadataOnly, p.SampleRows); err != nil {
+			if err := inspectRemoteBinlog(ctx, minioClient, bucketName, logPath, segment.StorageVersion, p.MetadataOnly, p.SampleRows, p.ShowRowGroups); err != nil {
 				fmt.Printf("failed to inspect %s: %s\n", logPath, err.Error())
 			}
 		}
@@ -102,7 +103,7 @@ func (s *InstanceState) inspectSegmentParquet(ctx context.Context, p *InspectPar
 	return nil
 }
 
-func inspectRemoteBinlog(ctx context.Context, minioClient *minio.Client, bucketName, logPath string, storageVersion int64, metadataOnly bool, sampleRows int64) error {
+func inspectRemoteBinlog(ctx context.Context, minioClient *minio.Client, bucketName, logPath string, storageVersion int64, metadataOnly bool, sampleRows int64, showRowGroups bool) error {
 	obj, err := minioClient.GetObject(ctx, bucketName, logPath, minio.GetObjectOptions{})
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func inspectRemoteBinlog(ctx context.Context, minioClient *minio.Client, bucketN
 	}
 	defer pqReader.Close()
 
-	return printParquetFile(ctx, pqReader, path.Base(logPath), metadataOnly, sampleRows)
+	return printParquetFile(ctx, pqReader, path.Base(logPath), metadataOnly, sampleRows, showRowGroups)
 }
 
 func openBinlogParquet(r storagecommon.ReadSeeker, storageVersion int64) (*file.Reader, error) {
@@ -133,15 +134,15 @@ func openBinlogParquet(r storagecommon.ReadSeeker, storageVersion int64) (*file.
 	}
 }
 
-func printParquetFile(ctx context.Context, pqReader *file.Reader, name string, metadataOnly bool, sampleRows int64) error {
-	printParquetMetadata(pqReader, name)
+func printParquetFile(ctx context.Context, pqReader *file.Reader, name string, metadataOnly bool, sampleRows int64, showRowGroups bool) error {
+	printParquetMetadata(pqReader, name, showRowGroups)
 	if metadataOnly {
 		return nil
 	}
 	return samplePqRows(ctx, pqReader, sampleRows)
 }
 
-func printParquetMetadata(pqReader *file.Reader, name string) {
+func printParquetMetadata(pqReader *file.Reader, name string, showRowGroups bool) {
 	md := pqReader.MetaData()
 	fmt.Printf("--- Parquet metadata: %s ---\n", name)
 	fmt.Printf("NumRows: %d | NumRowGroups: %d\n", pqReader.NumRows(), pqReader.NumRowGroups())
@@ -161,10 +162,12 @@ func printParquetMetadata(pqReader *file.Reader, name string) {
 		}
 	}
 
-	for rg := 0; rg < pqReader.NumRowGroups(); rg++ {
-		rgMd := md.RowGroup(rg)
-		fmt.Printf("RowGroup %d: NumRows=%d TotalByteSize=%d\n",
-			rg, rgMd.NumRows(), rgMd.TotalByteSize())
+	if showRowGroups {
+		for rg := 0; rg < pqReader.NumRowGroups(); rg++ {
+			rgMd := md.RowGroup(rg)
+			fmt.Printf("RowGroup %d: NumRows=%d TotalByteSize=%d\n",
+				rg, rgMd.NumRows(), rgMd.TotalByteSize())
+		}
 	}
 }
 
