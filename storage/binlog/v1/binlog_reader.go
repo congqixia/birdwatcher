@@ -140,6 +140,21 @@ func (reader *BinlogReader) NextFloatVectorEventReader() ([][]float32, error) {
 }
 
 func (reader *BinlogReader) NextRecordReader(ctx context.Context) (pqarrow.RecordReader, error) {
+	fileReader, err := reader.NextParquetReader()
+	if err != nil {
+		return nil, err
+	}
+	arrowReader, err := pqarrow.NewFileReader(fileReader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
+	if err != nil {
+		return nil, err
+	}
+
+	return arrowReader.GetRecordReader(ctx, nil, nil)
+}
+
+// NextParquetReader returns the underlying parquet file reader for the next insert event payload.
+// Useful for inspecting parquet metadata without decoding the records.
+func (reader *BinlogReader) NextParquetReader() (*file.Reader, error) {
 	eventReader := NewEventReader()
 	header, err := eventReader.ReadHeader(reader.reader)
 	if err != nil {
@@ -153,18 +168,11 @@ func (reader *BinlogReader) NextRecordReader(ctx context.Context) (pqarrow.Recor
 	next := int(header.EventLength - header.GetMemoryUsageInBytes() - insertEventData.GetEventDataFixPartSize())
 
 	data := make([]byte, next)
-	io.ReadFull(reader.reader, data)
-
-	fileReader, err := file.NewParquetReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	arrowReader, err := pqarrow.NewFileReader(fileReader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
-	if err != nil {
+	if _, err := io.ReadFull(reader.reader, data); err != nil {
 		return nil, err
 	}
 
-	return arrowReader.GetRecordReader(ctx, nil, nil)
+	return file.NewParquetReader(bytes.NewReader(data))
 }
 
 func (reader *BinlogReader) GetMapping() map[int64]int {
