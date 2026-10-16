@@ -38,3 +38,28 @@ File/manifest failures produce a partial report with explicit errors. Check thos
 and skipped segment counts before treating results as collection-wide totals.
 Use `--minioAddr` and `--skipBucketCheck` as with `show manifest`; external object
 credentials come from the collection schema.
+
+## Overriding masked component configuration
+
+Both `show parquet-footer` and `show manifest` accept internal object store
+connection overrides: `--minioAddr`, `--port`, `--cloudProvider`, `--region`,
+`--bucketName`, `--rootPath`, `--accessKeyID`, `--secretAccessKey`, `--useIAM`,
+`--useSSL`, `--iamEndpoint`, `--roleARN`, `--roleSessionName`, `--externalID`,
+`--aliyunRoleAuthMode`, and `--loadFrequency` (credential reload seconds).
+Omitted flags preserve discovered configuration. Supply optional boolean values
+as `--useIAM true` or `--useSSL false`; these flags require a value.
+
+When high-version components mask configuration, use `--ossStandalone` to skip
+configuration discovery entirely. In this mode `--minioAddr`, `--cloudProvider`
+and `--bucketName` are required; omitted TLS/IAM values default to false, and
+port/root path/role fields default to empty. Specify the real root path when
+manifest references contain `ROOT_PATH`.
+
+```text
+show parquet-footer --collection 12345 --ossStandalone --minioAddr s3.amazonaws.com --cloudProvider aws --bucketName my-bucket --rootPath files --region us-east-1 --useIAM true --useSSL true
+show manifest --collection 12345 --ossStandalone --minioAddr localhost:9000 --cloudProvider aws --bucketName milvus --rootPath files --useIAM false --useSSL false --accessKeyID YOUR_AK --secretAccessKey YOUR_SK
+```
+
+Overrides affect internal storage. External data object credentials continue to
+come from the collection schema. Standalone mode also avoids inheriting masked
+role credentials, which would otherwise take precedence over IAM/static auth.

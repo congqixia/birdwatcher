@@ -22,6 +22,7 @@ import (
 )
 
 type ShowManifestParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"show manifest" desc:"parse and display manifest file from S3 for segments"`
 	CollectionID        int64  `name:"collection" default:"0" desc:"collection id to filter with"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"segment id to display"`
@@ -57,12 +58,7 @@ func (s *InstanceState) ShowManifestCommand(ctx context.Context, p *ShowManifest
 		return nil
 	}
 
-	params := []oss.MinioConnectParam{oss.WithSkipCheckBucket(p.SkipBucketCheck)}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		return fmt.Errorf("failed to create minio client: %w", err)
 	}

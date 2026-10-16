@@ -20,6 +20,7 @@ import (
 )
 
 type ShowParquetFooterParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"show parquet-footer" desc:"analyze collection segment parquet footer sizes without reading data pages"`
 	CollectionID        int64  `name:"collection" default:"0" desc:"collection ID (required)"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"optional segment ID filter"`
@@ -127,11 +128,7 @@ func (s *InstanceState) ShowParquetFooterCommand(ctx context.Context, p *ShowPar
 		return err
 	}
 	sort.Slice(segments, func(i, j int) bool { return segments[i].ID < segments[j].ID })
-	params := []oss.MinioConnectParam{oss.WithSkipCheckBucket(p.SkipBucketCheck)}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-	internal, err := s.GetObjectStore(ctx, params...)
+	internal, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		return err
 	}
