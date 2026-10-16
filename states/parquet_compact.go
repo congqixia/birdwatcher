@@ -54,9 +54,77 @@ func compactFieldSize(f *compactField) int64 {
 	return int64(f.value.end - f.start)
 }
 
+// Projection retains only spans needed for footer attribution. In particular,
+// schema nodes, encodings, paths, encoding_stats and unknown subtrees are scanned
+// and validated without constructing a second in-memory representation of them.
+type compactProjection byte
+
+const (
+	compactFull compactProjection = iota
+	compactSpan
+	compactFooter
+	compactRowGroups
+	compactRowGroup
+	compactColumns
+	compactColumn
+	compactColumnMeta
+	compactStats
+	compactKVList
+	compactKV
+)
+
+func (p compactProjection) field(id int16) compactProjection {
+	switch p {
+	case compactFull:
+		return compactFull
+	case compactFooter:
+		switch id {
+		case 4:
+			return compactRowGroups
+		case 5:
+			return compactKVList
+		}
+	case compactRowGroup:
+		if id == 1 {
+			return compactColumns
+		}
+	case compactColumn:
+		if id == 3 {
+			return compactColumnMeta
+		}
+	case compactColumnMeta:
+		if id == 12 {
+			return compactStats
+		}
+	}
+	return compactSpan
+}
+func (p compactProjection) element() compactProjection {
+	switch p {
+	case compactFull:
+		return compactFull
+	case compactRowGroups:
+		return compactRowGroup
+	case compactColumns:
+		return compactColumn
+	case compactKVList:
+		return compactKV
+	}
+	return compactSpan
+}
+func (p compactProjection) keepChildren() bool { return p != compactSpan }
+
+// Keep the allocation inside these helpers: skipped values return by value and
+// do not allocate a compactNode on the heap for every visited scalar/container.
+func appendCompactField(n *compactNode, id int16, start int, value compactNode) {
+	n.fields = append(n.fields, compactField{id: id, start: start, value: &value})
+}
+func appendCompactItem(n *compactNode, value compactNode) { n.items = append(n.items, &value) }
+
 type compactScanner struct {
-	data       []byte
-	pos, nodes int
+	data            []byte
+	pos             int
+	nodes, maxNodes int64
 }
 
 func (s *compactScanner) take(n int) ([]byte, error) {
@@ -85,13 +153,21 @@ func (s *compactScanner) uint() (uint64, error) {
 	s.pos += n
 	return v, nil
 }
-func (s *compactScanner) value(kind byte, depth int) (*compactNode, error) {
-	if depth > 64 || s.nodes >= 2_000_000 {
-		return nil, fmt.Errorf("compact structure exceeds depth/node limit")
+func (s *compactScanner) count() error {
+	if s.nodes >= s.maxNodes {
+		return fmt.Errorf("compact node limit exceeded: visited=%d limit=%d at byte %d (adjust --maxScanNodes)", s.nodes, s.maxNodes, s.pos)
 	}
 	s.nodes++
-	n := &compactNode{start: s.pos, kind: kind}
-	var err error
+	return nil
+}
+func (s *compactScanner) value(kind byte, depth int, projection compactProjection) (n compactNode, err error) {
+	if depth > 64 {
+		return n, fmt.Errorf("compact depth limit exceeded: depth=%d limit=64 at byte %d", depth, s.pos)
+	}
+	if err = s.count(); err != nil {
+		return n, err
+	}
+	n = compactNode{start: s.pos, kind: kind}
 	switch kind {
 	case 1, 2:
 		n.integer = int64(kind) // struct booleans are encoded in the field header
@@ -110,7 +186,7 @@ func (s *compactScanner) value(kind byte, depth int) (*compactNode, error) {
 		size, err = s.uint()
 		if err == nil {
 			if size > uint64(len(s.data)-s.pos) {
-				return nil, io.ErrUnexpectedEOF
+				return n, io.ErrUnexpectedEOF
 			}
 			n.binary, err = s.take(int(size))
 		}
@@ -118,77 +194,86 @@ func (s *compactScanner) value(kind byte, depth int) (*compactNode, error) {
 		var head byte
 		head, err = s.byte()
 		if err != nil {
-			return nil, err
+			return n, err
 		}
 		count := uint64(head >> 4)
 		element := head & 15
 		if count == 15 {
 			count, err = s.uint()
 			if err != nil {
-				return nil, err
+				return n, err
 			}
 		}
-		if count > 2_000_000 {
-			return nil, fmt.Errorf("compact collection too large")
+		if count > uint64(s.maxNodes-s.nodes) {
+			return n, fmt.Errorf("compact collection count %d exceeds remaining node budget %d at byte %d (adjust --maxScanNodes)", count, s.maxNodes-s.nodes, s.pos)
 		}
 		for i := uint64(0); i < count; i++ {
-			var item *compactNode
+			var item compactNode
 			if element == 1 || element == 2 {
+				if err = s.count(); err != nil {
+					return n, err
+				}
 				start := s.pos
 				var b byte
 				b, err = s.byte()
 				if err == nil && b != 1 && b != 2 {
 					err = fmt.Errorf("invalid compact boolean")
 				}
-				item = &compactNode{start: start, end: s.pos, integer: int64(b)}
+				item = compactNode{start: start, end: s.pos, kind: element, integer: int64(b)}
 			} else {
-				item, err = s.value(element, depth+1)
+				item, err = s.value(element, depth+1, projection.element())
 			}
 			if err != nil {
-				return nil, err
+				return n, err
 			}
-			n.items = append(n.items, item)
+			if projection.keepChildren() {
+				appendCompactItem(&n, item)
+			}
 		}
 	case 11:
 		var count uint64
 		count, err = s.uint()
 		if err != nil {
-			return nil, err
+			return n, err
 		}
-		if count > 1_000_000 {
-			return nil, fmt.Errorf("compact map too large")
+		if count > uint64((s.maxNodes-s.nodes)/2) {
+			return n, fmt.Errorf("compact map count %d exceeds remaining node budget %d at byte %d (adjust --maxScanNodes)", count, s.maxNodes-s.nodes, s.pos)
 		}
 		if count > 0 {
 			var types byte
 			types, err = s.byte()
 			if err != nil {
-				return nil, err
+				return n, err
 			}
 			for i := uint64(0); i < count; i++ {
 				for _, typ := range []byte{types >> 4, types & 15} {
 					if typ == 1 || typ == 2 {
+						if err = s.count(); err != nil {
+							return n, err
+						}
 						var b byte
 						b, err = s.byte()
 						if err == nil && b != 1 && b != 2 {
 							err = fmt.Errorf("invalid compact map boolean")
 						}
 					} else {
-						_, err = s.value(typ, depth+1)
+						_, err = s.value(typ, depth+1, compactSpan)
 					}
 					if err != nil {
-						return nil, err
+						return n, err
 					}
 				}
 			}
 		}
 	case 12:
 		var last int16
+		seen := make(map[int16]struct{})
 		for {
 			start := s.pos
 			var head byte
 			head, err = s.byte()
 			if err != nil {
-				return nil, err
+				return n, err
 			}
 			if head == 0 {
 				break
@@ -200,44 +285,61 @@ func (s *compactScanner) value(kind byte, depth int) (*compactNode, error) {
 				var v uint64
 				v, err = s.uint()
 				if err != nil {
-					return nil, err
+					return n, err
 				}
 				signed := int64(v>>1) ^ -int64(v&1)
 				if signed < -32768 || signed > 32767 {
-					return nil, fmt.Errorf("invalid compact field ID")
+					return n, fmt.Errorf("invalid compact field ID")
 				}
 				id = int16(signed)
 			} else {
 				if int(last)+int(delta) > 32767 {
-					return nil, fmt.Errorf("compact field ID overflow")
+					return n, fmt.Errorf("compact field ID overflow")
 				}
 				id = last + int16(delta)
 			}
-			var child *compactNode
-			for _, existing := range n.fields {
-				if existing.id == id {
-					return nil, fmt.Errorf("duplicate compact field ID %d", id)
-				}
+			if _, exists := seen[id]; exists {
+				return n, fmt.Errorf("duplicate compact field ID %d", id)
 			}
-			child, err = s.value(typ, depth+1)
+			seen[id] = struct{}{}
+			var child compactNode
+			child, err = s.value(typ, depth+1, projection.field(id))
 			if err != nil {
-				return nil, err
+				return n, err
 			}
-			n.fields = append(n.fields, compactField{id: id, start: start, value: child})
+			if projection.keepChildren() {
+				appendCompactField(&n, id, start, child)
+			}
 			last = id
 		}
 	case 13:
 		_, err = s.take(16)
 	default:
-		return nil, fmt.Errorf("unsupported compact type %d at %d", kind, s.pos)
+		return n, fmt.Errorf("unsupported compact type %d at %d", kind, s.pos)
 	}
 	if err != nil {
-		return nil, err
+		return n, err
 	}
 	n.end = s.pos
 	return n, nil
 }
+func scanCompactProjected(data []byte, projection compactProjection, maxNodes int64) (*compactNode, error) {
+	// Every node consumes at least one input byte (including an inline boolean's
+	// field header). This bound accommodates valid large footers without a fixed
+	// node cutoff, while keeping malformed declared collection counts bounded.
+	if maxNodes == 0 {
+		maxNodes = int64(len(data)) + 1
+	}
+	if maxNodes < 0 {
+		return nil, fmt.Errorf("--maxScanNodes must be non-negative")
+	}
+	s := compactScanner{data: data, maxNodes: maxNodes}
+	n, err := s.value(12, 0, projection)
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
 func scanCompactStruct(data []byte) (*compactNode, error) {
-	s := compactScanner{data: data}
-	return s.value(12, 0)
+	return scanCompactProjected(data, compactFull, 0)
 }

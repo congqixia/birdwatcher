@@ -346,7 +346,7 @@ func TestAnalyzeParquetFlags(t *testing.T) {
 	receiver := &analyzeFlagReceiver{}
 	root := &cobra.Command{SilenceUsage: true, SilenceErrors: true}
 	host.MergeFunctionCommandsFrom(root, host, receiver)
-	root.SetArgs([]string{"analyze", "parquet", "--segment", "7", "--pages", "--rowGroups", "--top", "5", "--maxFooterBytes", "1000", "--useIAM", "false"})
+	root.SetArgs([]string{"analyze", "parquet", "--segment", "7", "--pages", "--rowGroups", "--top", "5", "--maxFooterBytes", "1000", "--maxScanNodes", "3000000", "--useIAM", "false"})
 	require.NoError(t, root.Execute())
 	require.NotNil(t, receiver.param)
 	require.EqualValues(t, 7, receiver.param.SegmentID)
@@ -354,6 +354,7 @@ func TestAnalyzeParquetFlags(t *testing.T) {
 	require.True(t, receiver.param.RowGroups)
 	require.EqualValues(t, 5, receiver.param.Top)
 	require.EqualValues(t, 1000, receiver.param.MaxFooterBytes)
+	require.EqualValues(t, 3000000, receiver.param.MaxScanNodes)
 	require.Equal(t, "false", receiver.param.UseIAM)
 }
 func TestSummarizeParquetAnalysisExcludesFailures(t *testing.T) {
@@ -404,4 +405,62 @@ func TestAnalyzeEmptyParquet(t *testing.T) {
 	require.Zero(t, result.Rows)
 	require.Empty(t, result.RowGroups)
 	require.EqualValues(t, len(data), sumParquetParts(result.Composition))
+}
+
+func TestProjectedCompactLargeFooter(t *testing.T) {
+	// A valid future metadata field with >2 million structures used to fail the
+	// fixed node limit. Its contents are irrelevant to attribution; only its span
+	// should be retained, without allocating a node for each empty struct.
+	const count = 2_100_000
+	var length [10]byte
+	n := binary.PutUvarint(length[:], count)
+	list := append([]byte{0xfc}, length[:n]...)
+	list = append(list, make([]byte, count)...)
+	raw := append(compactTestField(100, 9, list), 0)
+	root, err := scanCompactProjected(raw, compactFooter, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(raw), root.end)
+	field := root.child(100)
+	require.NotNil(t, field)
+	require.Empty(t, field.items)
+	parts, _, err := footerBreakdown(root)
+	require.NoError(t, err)
+	var total int64
+	for _, v := range parts {
+		total += v
+	}
+	require.EqualValues(t, len(raw), total)
+	_, err = scanCompactProjected(raw, compactFooter, 2_000_000)
+	require.ErrorContains(t, err, "node budget")
+	require.ErrorContains(t, err, "maxScanNodes")
+}
+
+func TestProjectedCompactMatchesFullAttribution(t *testing.T) {
+	data := makeAnalysisParquet(t, parquet.DataPageV2, true, compress.Codecs.Snappy)
+	n := int(binary.LittleEndian.Uint32(data[len(data)-8:]))
+	raw := data[len(data)-8-n : len(data)-8]
+	full, err := scanCompactStruct(raw)
+	require.NoError(t, err)
+	projected, err := scanCompactProjected(raw, compactFooter, 0)
+	require.NoError(t, err)
+	fullParts, fullKV, err := footerBreakdown(full)
+	require.NoError(t, err)
+	projectedParts, projectedKV, err := footerBreakdown(projected)
+	require.NoError(t, err)
+	require.Equal(t, fullParts, projectedParts)
+	require.Equal(t, fullKV, projectedKV)
+	// Schema and encoding/path collections retain their exact byte spans only.
+	require.Empty(t, projected.child(2).items)
+	cm := projected.child(4).items[0].child(1).items[0].child(3)
+	require.Empty(t, cm.child(2).items)
+	require.Empty(t, cm.child(3).items)
+	_, err = analyzeParquetObjectWithLimits(context.Background(), &parquetTestRange{data: data}, "test", int64(len(data)), 1<<20, false, 1)
+	require.ErrorContains(t, err, "node limit exceeded")
+}
+
+func TestCompactDepthLimitExplained(t *testing.T) {
+	raw := append(bytes.Repeat([]byte{0x1c}, 66), bytes.Repeat([]byte{0}, 67)...)
+	_, err := scanCompactProjected(raw, compactFooter, 0)
+	require.ErrorContains(t, err, "depth limit exceeded")
+	require.NotContains(t, err.Error(), "maxScanNodes")
 }

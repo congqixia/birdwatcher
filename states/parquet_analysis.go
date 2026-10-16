@@ -160,6 +160,10 @@ func footerBreakdown(root *compactNode) (map[string]int64, []parquetKVSize, erro
 }
 
 func analyzeParquetObject(ctx context.Context, reader v3RangeReader, key string, size, maxFooter int64, pages bool) (result parquetFileAnalysis, err error) {
+	return analyzeParquetObjectWithLimits(ctx, reader, key, size, maxFooter, pages, 0)
+}
+
+func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, key string, size, maxFooter int64, pages bool, maxScanNodes int64) (result parquetFileAnalysis, err error) {
 	result = parquetFileAnalysis{Path: key, FileBytes: size, PagesAnalyzed: pages, Findings: []string{}}
 	// Arrow's metadata schema initialization assumes a structurally valid schema.
 	// Treat malformed-file panics as per-file failures, preserving other results.
@@ -180,7 +184,7 @@ func analyzeParquetObject(ctx context.Context, reader v3RangeReader, key string,
 	if err != nil {
 		return result, err
 	}
-	root, err := scanCompactStruct(raw)
+	root, err := scanCompactProjected(raw, compactFooter, maxScanNodes)
 	if err != nil {
 		return result, fmt.Errorf("scan footer: %w", err)
 	}
@@ -422,7 +426,7 @@ func addParquetFindings(r *parquetFileAnalysis, parts map[string]int64) {
 	}
 	for _, p := range r.Composition {
 		if p.Name == "unclassified" && p.Bytes > 0 {
-			r.Findings = append(r.Findings, fmt.Sprintf("%d bytes are unclassified (gaps, padding, or unsupported structures); no corruption is inferred from gaps alone.", p.Bytes))
+			r.Findings = append(r.Findings, fmt.Sprintf("%s is unclassified (gaps, padding, or unsupported structures); no corruption is inferred from gaps alone.", formatFooterSize(float64(p.Bytes))))
 		}
 	}
 	for _, c := range r.Columns {

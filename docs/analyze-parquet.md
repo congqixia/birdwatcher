@@ -117,7 +117,13 @@ Context cancellation stops the command.
 ## Limits and OSS overrides
 
 `--maxFooterBytes` defaults to 134217728 (128 MiB) per file. The Compact Protocol
-scanner also limits nesting to 64 and nodes to 2 million. Files are processed
+scanner limits nesting to 64. By default, its node budget is derived from the
+serialized metadata byte length plus one, rather than a fixed node count.
+`--maxScanNodes N` sets an explicit positive footer scan budget; zero selects
+the automatic budget. Depth-limit errors are reported separately and cannot be
+changed with this flag. Irrelevant nested schema, encoding, path and unknown
+structures are scanned without retaining a second tree; only the spans and
+fields needed for attribution are kept. Files are processed
 sequentially and metadata is parsed in memory; decoded structures can consume
 more memory than serialized footer bytes. Increase the byte limit deliberately
 for larger footers. Per-file results retain column/row-group metrics for JSON.
