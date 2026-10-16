@@ -17,7 +17,8 @@ import (
 )
 
 type AnalyzeParquetParam struct {
-	MaxScanNodes int64 `name:"maxScanNodes" default:"0" desc:"footer scanner node budget; 0 derives budget from serialized metadata byte length"`
+	VerifyChunkMetadata bool  `name:"verifyChunkMetadata" default:"false" desc:"verify exact footer ColumnChunk copies in gaps after data chunks (additional range requests)"`
+	MaxScanNodes        int64 `name:"maxScanNodes" default:"0" desc:"footer scanner node budget; 0 derives budget from serialized metadata byte length"`
 	OSSOverrideParam
 	framework.ParamBase `use:"analyze parquet" desc:"analyze segment parquet storage, footer attribution and optional page layout"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"segment ID (required)"`
@@ -84,7 +85,7 @@ func (s *InstanceState) AnalyzeParquetCommand(ctx context.Context, p *AnalyzePar
 			if e != nil {
 				result.Error = e.Error()
 			} else {
-				result, e = analyzeParquetObjectWithLimits(ctx, objectStoreV3RangeReader{store: target.store}, target.key, stat.Size, p.MaxFooterBytes, p.Pages, p.MaxScanNodes)
+				result, e = analyzeParquetObjectWithLimits(ctx, objectStoreV3RangeReader{store: target.store}, target.key, stat.Size, p.MaxFooterBytes, p.Pages, p.MaxScanNodes, p.VerifyChunkMetadata)
 				if e != nil {
 					result.Error = e.Error()
 				}

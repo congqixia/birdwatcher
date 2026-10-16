@@ -346,12 +346,13 @@ func TestAnalyzeParquetFlags(t *testing.T) {
 	receiver := &analyzeFlagReceiver{}
 	root := &cobra.Command{SilenceUsage: true, SilenceErrors: true}
 	host.MergeFunctionCommandsFrom(root, host, receiver)
-	root.SetArgs([]string{"analyze", "parquet", "--segment", "7", "--pages", "--rowGroups", "--top", "5", "--maxFooterBytes", "1000", "--maxScanNodes", "3000000", "--useIAM", "false"})
+	root.SetArgs([]string{"analyze", "parquet", "--segment", "7", "--pages", "--rowGroups", "--verifyChunkMetadata", "--top", "5", "--maxFooterBytes", "1000", "--maxScanNodes", "3000000", "--useIAM", "false"})
 	require.NoError(t, root.Execute())
 	require.NotNil(t, receiver.param)
 	require.EqualValues(t, 7, receiver.param.SegmentID)
 	require.True(t, receiver.param.Pages)
 	require.True(t, receiver.param.RowGroups)
+	require.True(t, receiver.param.VerifyChunkMetadata)
 	require.EqualValues(t, 5, receiver.param.Top)
 	require.EqualValues(t, 1000, receiver.param.MaxFooterBytes)
 	require.EqualValues(t, 3000000, receiver.param.MaxScanNodes)
@@ -454,7 +455,7 @@ func TestProjectedCompactMatchesFullAttribution(t *testing.T) {
 	cm := projected.child(4).items[0].child(1).items[0].child(3)
 	require.Empty(t, cm.child(2).items)
 	require.Empty(t, cm.child(3).items)
-	_, err = analyzeParquetObjectWithLimits(context.Background(), &parquetTestRange{data: data}, "test", int64(len(data)), 1<<20, false, 1)
+	_, err = analyzeParquetObjectWithLimits(context.Background(), &parquetTestRange{data: data}, "test", int64(len(data)), 1<<20, false, 1, false)
 	require.ErrorContains(t, err, "node limit exceeded")
 }
 

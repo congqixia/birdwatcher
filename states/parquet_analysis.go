@@ -48,27 +48,28 @@ type parquetRowGroupSize struct {
 	Columns         []parquetColumnSize `json:"columns"`
 }
 type parquetFileAnalysis struct {
-	Path                      string                `json:"path"`
-	Backend                   string                `json:"backend"`
-	ManifestPaths             []string              `json:"manifest_paths,omitempty"`
-	FileBytes                 int64                 `json:"file_bytes"`
-	Rows                      int64                 `json:"rows"`
-	PhysicalColumns           int                   `json:"physical_columns"`
-	MetadataBytes             int64                 `json:"metadata_bytes"`
-	FooterBytes               int64                 `json:"footer_bytes"`
-	FooterPercent             float64               `json:"footer_percent"`
-	FooterBytesPerRow         float64               `json:"footer_bytes_per_row"`
-	FooterBytesPerRowGroup    float64               `json:"footer_bytes_per_row_group"`
-	FooterBytesPerColumnChunk float64               `json:"footer_bytes_per_column_chunk"`
-	Composition               []parquetSizePart     `json:"composition"`
-	FooterComposition         []parquetSizePart     `json:"footer_composition"`
-	KeyValueMetadata          []parquetKVSize       `json:"key_value_metadata"`
-	Columns                   []parquetColumnSize   `json:"columns"`
-	RowGroups                 []parquetRowGroupSize `json:"row_groups"`
-	Findings                  []string              `json:"findings"`
-	PagesAnalyzed             bool                  `json:"pages_analyzed"`
-	Pages                     []parquetPageSize     `json:"pages,omitempty"`
-	Error                     string                `json:"error,omitempty"`
+	InlineMetadataVerification *parquetInlineVerification `json:"inline_metadata_verification,omitempty"`
+	Path                       string                     `json:"path"`
+	Backend                    string                     `json:"backend"`
+	ManifestPaths              []string                   `json:"manifest_paths,omitempty"`
+	FileBytes                  int64                      `json:"file_bytes"`
+	Rows                       int64                      `json:"rows"`
+	PhysicalColumns            int                        `json:"physical_columns"`
+	MetadataBytes              int64                      `json:"metadata_bytes"`
+	FooterBytes                int64                      `json:"footer_bytes"`
+	FooterPercent              float64                    `json:"footer_percent"`
+	FooterBytesPerRow          float64                    `json:"footer_bytes_per_row"`
+	FooterBytesPerRowGroup     float64                    `json:"footer_bytes_per_row_group"`
+	FooterBytesPerColumnChunk  float64                    `json:"footer_bytes_per_column_chunk"`
+	Composition                []parquetSizePart          `json:"composition"`
+	FooterComposition          []parquetSizePart          `json:"footer_composition"`
+	KeyValueMetadata           []parquetKVSize            `json:"key_value_metadata"`
+	Columns                    []parquetColumnSize        `json:"columns"`
+	RowGroups                  []parquetRowGroupSize      `json:"row_groups"`
+	Findings                   []string                   `json:"findings"`
+	PagesAnalyzed              bool                       `json:"pages_analyzed"`
+	Pages                      []parquetPageSize          `json:"pages,omitempty"`
+	Error                      string                     `json:"error,omitempty"`
 }
 type parquetInterval struct {
 	start, end int64
@@ -160,10 +161,10 @@ func footerBreakdown(root *compactNode) (map[string]int64, []parquetKVSize, erro
 }
 
 func analyzeParquetObject(ctx context.Context, reader v3RangeReader, key string, size, maxFooter int64, pages bool) (result parquetFileAnalysis, err error) {
-	return analyzeParquetObjectWithLimits(ctx, reader, key, size, maxFooter, pages, 0)
+	return analyzeParquetObjectWithLimits(ctx, reader, key, size, maxFooter, pages, 0, false)
 }
 
-func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, key string, size, maxFooter int64, pages bool, maxScanNodes int64) (result parquetFileAnalysis, err error) {
+func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, key string, size, maxFooter int64, pages bool, maxScanNodes int64, verifyChunkMetadata bool) (result parquetFileAnalysis, err error) {
 	result = parquetFileAnalysis{Path: key, FileBytes: size, PagesAnalyzed: pages, Findings: []string{}}
 	// Arrow's metadata schema initialization assumes a structurally valid schema.
 	// Treat malformed-file panics as per-file failures, preserving other results.
@@ -216,6 +217,7 @@ func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, k
 	}
 	aggregates := map[string]*parquetColumnSize{}
 	chunkCount := 0
+	var inlineCandidates []parquetInlineCandidate
 	for i := range md.GetRowGroups() {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -273,6 +275,9 @@ func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, k
 			end := start + col.CompressedBytes
 			if col.CompressedBytes > 0 {
 				intervals = append(intervals, parquetInterval{start, end, "column_chunks"})
+				if verifyChunkMetadata {
+					inlineCandidates = append(inlineCandidates, parquetInlineCandidate{offset: end, footerStart: cn.start, footerEnd: cn.end})
+				}
 			}
 			for _, index := range []struct {
 				offset, length int16
@@ -379,6 +384,13 @@ func analyzeParquetObjectWithLimits(ctx context.Context, reader v3RangeReader, k
 			r.BytesPerRow = float64(r.CompressedBytes) / float64(r.Rows)
 		}
 		result.RowGroups = append(result.RowGroups, r)
+	}
+	if verifyChunkMetadata {
+		intervals, result.InlineMetadataVerification, err = verifyParquetInlineMetadata(ctx, reader, key, size, raw, intervals, inlineCandidates)
+		if err != nil {
+			return result, err
+		}
+		result.Findings = append(result.Findings, inlineVerificationFinding(result.InlineMetadataVerification))
 	}
 	result.Composition, err = accountParquetIntervals(size, intervals)
 	if err != nil {

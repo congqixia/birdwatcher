@@ -139,3 +139,46 @@ analyze parquet --segment 67890 --pages --ossStandalone --minioAddr s3.amazonaws
 External credentials are resolved from collection schema only when a selected
 external object needs to be read. The external location may be parsed to match a
 resolved key even when only an internal file is selected.
+
+## Confirming inline ColumnChunk metadata copies
+
+To test whether unclassified bytes are duplicated column metadata in an
+Arrow-compatible writer layout, run:
+
+```text
+analyze parquet --segment 67890 --file data.parquet --verifyChunkMetadata
+analyze parquet --segment 67890 --file data.parquet --verifyChunkMetadata --pages --json
+```
+
+For each nonempty column chunk, this opt-in check examines the gap immediately
+following its data pages. It compares the candidate bytes with the **entire
+original serialized ColumnChunk struct** from the footer, including the stop
+marker. Only an exact byte match is accepted. Similar sizes, parseable arbitrary
+Thrift structures, or a `created_by` writer name are insufficient evidence.
+Probes must fit wholly within a previously unclassified gap and cannot overlap
+data, indexes, Bloom filters, footer, or an already confirmed copy.
+
+Confirmed ranges appear as `inline_column_metadata` in storage composition,
+reducing `unclassified` by exactly the verified byte count. File and footer sizes
+are unchanged. The Finding and JSON `inline_metadata_verification` include:
+
+- `original_unclassified_bytes`: unclassified bytes before verification.
+- `verified_bytes` and `verified_percent`: how much of that space is confirmed.
+- `remaining_unclassified_bytes`: space that is still unexplained.
+- `candidates`, `matched`, `unmatched`, `read_errors`: per-chunk verification counts.
+
+If a previously reported 39.65 MB is fully matched, the Finding will show about
+39.65 MB verified, 100% coverage, and zero remaining unclassified bytes. Partial
+matches explain only that portion. Read failures leave the affected ranges
+unclassified and increment `read_errors`; they do not invalidate the rest of the
+size report. Cancellation still stops the command.
+
+This confirms physical duplicated metadata and a layout consistent with Arrow,
+**not the unique identity of the writer library**. Writers may omit the inline
+copy, serialize equivalent metadata differently, append additional footer-only
+fields, or put a copy elsewhere. Those cases are conservatively unmatched.
+
+This check requires extra range requests, potentially one per candidate chunk,
+and reads the metadata copies themselves (up to the expected footer struct
+length). It does not decode or scan page payloads, and does not run unless
+`--verifyChunkMetadata` is supplied. Verification is independent of `--pages`.
