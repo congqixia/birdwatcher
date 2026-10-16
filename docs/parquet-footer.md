@@ -63,3 +63,9 @@ show manifest --collection 12345 --ossStandalone --minioAddr localhost:9000 --cl
 Overrides affect internal storage. External data object credentials continue to
 come from the collection schema. Standalone mode also avoids inheriting masked
 role credentials, which would otherwise take precedence over IAM/static auth.
+
+Text reports format sizes automatically in B/KB/MB/GB and larger decimal units
+(1 KB = 1000 bytes), with two decimal places. JSON retains raw byte counts.
+
+For detailed per-segment/per-file storage, footer and optional page breakdowns,
+use [`analyze parquet`](analyze-parquet.md).

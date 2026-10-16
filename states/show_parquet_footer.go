@@ -254,8 +254,8 @@ func printParquetFooterReport(r parquetFooterReport, top int64) {
 	s := r.Summary
 	fmt.Printf("Collection %d: segments=%d skipped=%d files=%d failed=%d manifest/resolve errors=%d\n", r.CollectionID, r.Segments, len(r.SkippedSegments), s.Files, len(r.Files)-s.Files, len(r.Errors))
 	fmt.Println("Footer = serialized metadata + 8-byte trailer; totals count unique files per segment (shared files across segments count again).")
-	fmt.Printf("File bytes=%d metadata bytes=%d footer bytes=%d footer/file=%.4f%%\n", s.FileBytes, s.MetadataBytes, s.FooterBytes, s.FooterPercent)
-	fmt.Printf("Footer bytes: min=%d mean=%.2f p50=%d p95=%d max=%d (nearest-rank percentiles)\n", s.Min, s.Mean, s.P50, s.P95, s.Max)
+	fmt.Printf("File size=%s metadata=%s footer=%s footer/file=%.4f%%\n", formatFooterSize(float64(s.FileBytes)), formatFooterSize(float64(s.MetadataBytes)), formatFooterSize(float64(s.FooterBytes)), s.FooterPercent)
+	fmt.Printf("Footer size: min=%s mean=%s p50=%s p95=%s max=%s (nearest-rank percentiles)\n", formatFooterSize(float64(s.Min)), formatFooterSize(s.Mean), formatFooterSize(float64(s.P50)), formatFooterSize(float64(s.P95)), formatFooterSize(float64(s.Max)))
 	for _, id := range r.SkippedSegments {
 		fmt.Printf("SKIP segment %d: no manifest and storage version is not 2\n", id)
 	}
@@ -279,7 +279,7 @@ func printParquetFooterReport(r parquetFooterReport, top int64) {
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
 		summary := summarizeParquetFooters(bySegment[id])
-		fmt.Printf("Segment %d: files=%d footer bytes=%d footer/file=%.4f%%\n", id, summary.Files, summary.FooterBytes, summary.FooterPercent)
+		fmt.Printf("Segment %d: files=%d footer=%s footer/file=%.4f%%\n", id, summary.Files, formatFooterSize(float64(summary.FooterBytes)), summary.FooterPercent)
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].FooterBytes > ranked[j].FooterBytes })
 	fmt.Printf("Largest footers (top %d):\n", top)
@@ -287,6 +287,18 @@ func printParquetFooterReport(r parquetFooterReport, top int64) {
 		if int64(i) >= top {
 			break
 		}
-		fmt.Printf("  segment=%d footer=%d metadata=%d file=%d ratio=%.4f%% backend=%s %s\n", f.SegmentID, f.FooterBytes, f.MetadataBytes, f.FileBytes, f.FooterPercent, f.Backend, f.Path)
+		fmt.Printf("  segment=%d footer=%s metadata=%s file=%s ratio=%.4f%% backend=%s %s\n", f.SegmentID, formatFooterSize(float64(f.FooterBytes)), formatFooterSize(float64(f.MetadataBytes)), formatFooterSize(float64(f.FileBytes)), f.FooterPercent, f.Backend, f.Path)
 	}
+}
+
+// formatFooterSize uses decimal SI units (1 KB = 1000 bytes).
+// Accept float64 to preserve fractional bytes in the mean.
+func formatFooterSize(size float64) string {
+	units := [...]string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
+	unit := 0
+	for size >= 1000 && unit < len(units)-1 {
+		size /= 1000
+		unit++
+	}
+	return fmt.Sprintf("%.2f %s", size, units[unit])
 }
