@@ -26,7 +26,7 @@ type ShowParquetFooterParam struct {
 	MinioAddress        string `name:"minioAddr" desc:"override internal minio address"`
 	SkipBucketCheck     bool   `name:"skipBucketCheck" default:"false" desc:"skip bucket existence check"`
 	JSONOutput          bool   `name:"json" default:"false" desc:"output structured JSON report"`
-	Top                 int    `name:"top" default:"10" desc:"number of largest footers to display"`
+	Top                 int64  `name:"top" default:"10" desc:"number of largest footers to display"`
 }
 
 type parquetFooterFile struct {
@@ -253,7 +253,7 @@ func inspectParquetFooter(ctx context.Context, store oss.ObjectStore, key, backe
 	f.FooterPercent = 100 * float64(f.FooterBytes) / float64(f.FileBytes)
 	return f
 }
-func printParquetFooterReport(r parquetFooterReport, top int) {
+func printParquetFooterReport(r parquetFooterReport, top int64) {
 	s := r.Summary
 	fmt.Printf("Collection %d: segments=%d skipped=%d files=%d failed=%d manifest/resolve errors=%d\n", r.CollectionID, r.Segments, len(r.SkippedSegments), s.Files, len(r.Files)-s.Files, len(r.Errors))
 	fmt.Println("Footer = serialized metadata + 8-byte trailer; totals count unique files per segment (shared files across segments count again).")
@@ -287,7 +287,7 @@ func printParquetFooterReport(r parquetFooterReport, top int) {
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].FooterBytes > ranked[j].FooterBytes })
 	fmt.Printf("Largest footers (top %d):\n", top)
 	for i, f := range ranked {
-		if i >= top {
+		if int64(i) >= top {
 			break
 		}
 		fmt.Printf("  segment=%d footer=%d metadata=%d file=%d ratio=%.4f%% backend=%s %s\n", f.SegmentID, f.FooterBytes, f.MetadataBytes, f.FileBytes, f.FooterPercent, f.Backend, f.Path)
