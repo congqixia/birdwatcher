@@ -20,6 +20,7 @@ import (
 )
 
 type DownloadSegmentParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"download-segment" desc:"download segment file with provided segment id"`
 	MinioAddress        string `name:"minioAddr" default:"" desc:"the minio address to override, leave empty to use milvus.yaml value"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"segment id to download"`
@@ -33,12 +34,7 @@ func (s *InstanceState) DownloadSegmentCommand(ctx context.Context, p *DownloadS
 		return err
 	}
 
-	params := []oss.MinioConnectParam{}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, false)
 	if err != nil {
 		return err
 	}

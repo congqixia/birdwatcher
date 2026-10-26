@@ -20,6 +20,7 @@ import (
 )
 
 type ScanDeltalogParams struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"scan-deltalog" desc:"scan deltalog to check delta data"`
 	CollectionID        int64    `name:"collection" default:"0"`
 	SegmentID           int64    `name:"segment" default:"0"`
@@ -72,12 +73,7 @@ func (s *InstanceState) ScanDeltalogCommand(ctx context.Context, p *ScanDeltalog
 		return err
 	}
 
-	params := []oss.MinioConnectParam{oss.WithSkipCheckBucket(p.SkipBucketCheck)}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		fmt.Println("Failed to create client,", err.Error())
 		return err

@@ -25,6 +25,7 @@ import (
 )
 
 type CheckPartitionKeyParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"check-partiton-key" desc:"check partition key field file"`
 	Storage             string `name:"storage" default:"auto" desc:"storage service configuration mode"`
 	StopIfErr           bool   `name:"stopIfErr" default:"true"`
@@ -49,12 +50,7 @@ func (s *InstanceState) CheckPartitionKeyCommand(ctx context.Context, p *CheckPa
 
 	var rootPath string
 
-	params := []oss.MinioConnectParam{}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, false)
 	if err != nil {
 		return err
 	}

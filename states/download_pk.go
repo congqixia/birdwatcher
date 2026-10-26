@@ -22,6 +22,7 @@ import (
 )
 
 type DownloadPKParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"download-pk" desc:"download segment pk with provided collection/segment id"`
 	MinioAddress        string `name:"minioAddr" default:"" desc:"the minio address to override, leave empty to use milvus.yaml value"`
 	CollectionID        int64  `name:"collection" default:"0" desc:"collection id to download"`
@@ -45,12 +46,7 @@ func (s *InstanceState) DownloadPKCommand(ctx context.Context, p *DownloadPKPara
 		return err
 	}
 
-	params := []oss.MinioConnectParam{}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, false)
 	if err != nil {
 		return err
 	}

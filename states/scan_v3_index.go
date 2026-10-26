@@ -26,6 +26,7 @@ import (
 
 type ScanV3IndexParams struct {
 	framework.DataSetParam `use:"scan-v3-index" desc:"scan scalar index V3 files and diagnose schema/path/meta mismatches" alias:"scan-scalar-index-v3"`
+	OSSOverrideParam
 	CollectionID           int64  `name:"collection" default:"0" desc:"collection id to filter with"`
 	PartitionID            int64  `name:"partition" default:"0" desc:"partition id to filter with"`
 	SegmentID              int64  `name:"segment" default:"0" desc:"segment id to filter with"`
@@ -209,11 +210,7 @@ func (s *InstanceState) ScanV3IndexCommand(ctx context.Context, p *ScanV3IndexPa
 	if err != nil {
 		return nil, err
 	}
-	params := []oss.MinioConnectParam{oss.WithSkipCheckBucket(p.SkipBucketCheck)}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		return nil, err
 	}

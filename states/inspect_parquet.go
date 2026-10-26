@@ -27,6 +27,7 @@ import (
 )
 
 type InspectParquetParam struct {
+	OSSOverrideParam
 	framework.ParamBase `use:"inspect-parquet" desc:"inspect parquet file metadata and optionally sample rows"`
 	FilePath            string `name:"file" default:"" desc:"local parquet file path to inspect"`
 	SegmentID           int64  `name:"segment" default:"0" desc:"segment ID to inspect binlogs from remote storage"`
@@ -182,11 +183,7 @@ func (s *InstanceState) inspectSegmentParquet(ctx context.Context, p *InspectPar
 		}
 	}
 
-	params := []oss.MinioConnectParam{oss.WithSkipCheckBucket(p.SkipBucketCheck)}
-	if p.MinioAddress != "" {
-		params = append(params, oss.WithMinioAddr(p.MinioAddress))
-	}
-	resolvedStore, err := s.GetObjectStore(ctx, params...)
+	resolvedStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		return err
 	}
@@ -248,7 +245,7 @@ func (s *InstanceState) inspectExternalCollectionParquet(ctx context.Context, p 
 		return inspectRemoteParquetObject(ctx, externalStore, objectKey, p.MetadataOnly, p.SampleRows, p.ShowRowGroups)
 	}
 
-	manifestStore, err := s.GetObjectStore(ctx, oss.WithSkipCheckBucket(p.SkipBucketCheck))
+	manifestStore, err := s.getObjectStoreWithOverrides(ctx, p.OSSOverrideParam, p.MinioAddress, p.SkipBucketCheck)
 	if err != nil {
 		return err
 	}
