@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 
+	"github.com/milvus-io/birdwatcher/configs"
 	"github.com/milvus-io/birdwatcher/framework"
 )
 
@@ -17,6 +19,13 @@ func init() {
 			return nil
 		}
 		_, err := exec.LookPath(value) // check if the command exists
+		return err
+	}
+	validator[configs.OSSPathCompletion] = func(key string, value string) error {
+		if value == "" {
+			return nil
+		}
+		_, err := strconv.ParseBool(value)
 		return err
 	}
 }
