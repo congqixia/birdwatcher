@@ -15,6 +15,8 @@ import (
 const (
 	configFileName   = `birdwatcher.yaml`
 	defaultWorkspace = `bw_workspace`
+	// OSSPathCompletion controls remote path suggestions for the OSS cd command.
+	OSSPathCompletion = "OSS_PATH_COMPLETION"
 )
 
 var (

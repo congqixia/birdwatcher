@@ -83,6 +83,19 @@ Backing up ... 100%(37/37)
 backup etcd for prefix by-dev/meta done, stored in file: bw_etcd_ALL.220707-152246.bak.gz
 ```
 
+### OSS path completion
+
+After `connect oss`, `cd` suggests paths by listing object storage prefixes.
+For buckets with many prefixes, disable these suggestions with:
+
+```shell
+set bw-config --key OSS_PATH_COMPLETION --value false
+```
+
+Completion is enabled by default. Set the value to `true` (or an empty value)
+to enable it again. The setting takes effect immediately and uses the process
+environment, so it can also be set before starting Birdwatcher.
+
 ### help
 
 And use `help` command to check other commands.

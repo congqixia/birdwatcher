@@ -141,7 +141,7 @@ func (app *ApplicationState) IsEnding() bool {
 }
 
 func (app *ApplicationState) ConnectMinioCommand(ctx context.Context, p *storage.ConnectOSSParam) error {
-	state, err := storage.ConnectOSS(ctx, p, app.core)
+	state, err := storage.ConnectOSS(ctx, p, app.core, app.config)
 	if err != nil {
 		return err
 	}

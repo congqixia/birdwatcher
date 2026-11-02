@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 
+	"github.com/milvus-io/birdwatcher/configs"
 	"github.com/milvus-io/birdwatcher/framework"
 	"github.com/milvus-io/birdwatcher/oss"
 	"github.com/milvus-io/birdwatcher/states/autocomplete"
@@ -19,6 +21,7 @@ type OSSState struct {
 	bucket       string
 	rootPath     string
 	prefix       string
+	config       *configs.Config
 }
 
 const minioPathSuggester = "minio-path"
@@ -49,6 +52,15 @@ func (s *OSSState) RootPath() string {
 }
 
 func (s *OSSState) suggestPaths(partial string) []string {
+	if s.config != nil {
+		value, err := s.config.GetConfig("env", configs.OSSPathCompletion)
+		if err == nil {
+			if enabled, err := strconv.ParseBool(value); err == nil && !enabled {
+				return nil
+			}
+		}
+	}
+
 	var listPrefix string
 	var filterPart string
 	var resultPrefix string
@@ -122,7 +134,7 @@ type ConnectOSSParam struct {
 	SkipBucketCheck     bool   `name:"skipBucketCheck" default:"true"`
 }
 
-func ConnectOSS(ctx context.Context, p *ConnectOSSParam, parent *framework.CmdState) (*OSSState, error) {
+func ConnectOSS(ctx context.Context, p *ConnectOSSParam, parent *framework.CmdState, config ...*configs.Config) (*OSSState, error) {
 	mp := oss.MinioClientParam{
 		CloudProvider: p.CloudProvider,
 		Region:        p.Region,
@@ -146,12 +158,17 @@ func ConnectOSS(ctx context.Context, p *ConnectOSSParam, parent *framework.CmdSt
 		return nil, err
 	}
 
+	var cfg *configs.Config
+	if len(config) > 0 {
+		cfg = config[0]
+	}
 	return &OSSState{
 		store:        oss.NewMinioObjectStore(mClient),
 		bucket:       p.Bucket,
 		rootPath:     mp.RootPath,
 		connectParam: mp,
 		prefix:       mp.RootPath,
+		config:       cfg,
 		CmdState:     parent.Spawn(fmt.Sprintf("OSS[%s](%s/%s)", p.CloudProvider, p.Bucket, p.RootPath)),
 	}, nil
 }
