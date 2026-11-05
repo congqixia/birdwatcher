@@ -99,3 +99,39 @@ environment, so it can also be set before starting Birdwatcher.
 ### help
 
 And use `help` command to check other commands.
+
+### repair segment index types after snapshot restore
+
+When restored etcd segment index records have a missing or incorrect actual index
+type, the operator can explicitly set it without rebuilding the index files:
+
+```text
+repair segment-index-type --collection 123 --index 456 --index-type HNSW
+repair segment-index-type --collection 123 --index 456 --index-type HNSW --run
+```
+
+The first command previews the changes. `--run` reads and validates a fresh plan,
+then updates each selected record with compare-and-swap and verifies readback.
+If a write fails, it stops and reports the number of confirmed commits without
+rolling them back. Rerunning builds a fresh plan and skips already-correct types.
+The operator must verify that the existing index artifacts actually use
+the specified type; this command does not inspect files or infer types from the
+collection definition. For mixed types, use `--segment <id>` to select one segment
+per invocation. `AUTOINDEX` is not a concrete artifact type.
+
+Only non-deleted, finished indexes with files on live, Flushed segments are
+updated. Other protobuf fields, including unknown fields, are preserved. Matching
+types are a no-op. Manifest-owned indexes are unsupported: any selected live
+segment marked as containing manifest indexes causes the entire operation to fail,
+even if that segment has no etcd index row. Segment-rooted or unknown index path
+versions are also rejected. No manifest or collection index definition is changed.
+
+Use a live etcd connection (normal audit wrappers are supported; TiKV and offline
+backups are unsupported). Back up metadata and stop metadata writers, including
+all eligible DataCoord leaders, before applying the repair. Concurrent changes
+to an index record, its segment or its index definition stop that record from
+being overwritten. New records created after preflight are outside the plan.
+There is no collection-wide transaction or automatic retry. A timeout can leave
+the current write outcome unknown: inspect that key before retrying. After a
+successful repair, restart DataCoord and reload the affected collection before
+serving queries. Updating etcd alone does not refresh running components' caches.
