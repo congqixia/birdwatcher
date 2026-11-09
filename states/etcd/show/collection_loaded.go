@@ -63,9 +63,10 @@ func (rs *CollectionsLoaded) PrintAs(format framework.Format) string {
 
 func (rs *CollectionsLoaded) printAsJSON() string {
 	type CollectionLoadedJSON struct {
-		CollectionID  int64  `json:"collection_id"`
-		ReplicaNumber int32  `json:"replica_number"`
-		Status        string `json:"status"`
+		CollectionID  int64   `json:"collection_id"`
+		ReplicaNumber int32   `json:"replica_number"`
+		Status        string  `json:"status"`
+		LoadFields    []int64 `json:"load_fields"`
 	}
 
 	type OutputJSON struct {
@@ -84,6 +85,7 @@ func (rs *CollectionsLoaded) printAsJSON() string {
 			CollectionID:  info.CollectionID,
 			ReplicaNumber: info.ReplicaNumber,
 			Status:        info.Status.String(),
+			LoadFields:    info.LoadFields,
 		})
 	}
 
@@ -95,4 +97,5 @@ func (rs *CollectionsLoaded) printCollectionLoaded(sb *strings.Builder, cl *mode
 	fmt.Fprintf(sb, "CollectionID: %d\n", info.CollectionID)
 	fmt.Fprintf(sb, "ReplicaNumber: %d", info.ReplicaNumber)
 	fmt.Fprintf(sb, "\tLoadStatus: %s\n", info.Status.String())
+	fmt.Fprintf(sb, "LoadFields: %v\n", info.LoadFields)
 }
