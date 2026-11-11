@@ -33,6 +33,10 @@ const (
 	MaxSnapshotTS = uint64(math.MaxUint64)
 	// For reads by prefix we can customize the scan size to increase/decrease rpc calls.
 	SnapshotScanSize = 100
+	// etcdLoadWithPrefixPageSize bounds each LoadWithPrefix Range page. Pages
+	// must stay small enough to never trip the gRPC transport message size
+	// limits.
+	etcdLoadWithPrefixPageSize = 100
 	// This empty value is what we are reserving within TiKv to represent an empty string value.
 	// TiKV does not allow storing empty values for keys which is something we do in Milvus, so
 	// to get over this we are using the reserved keyword as placeholder.
@@ -116,26 +120,55 @@ func (kv *etcdKV) Load(ctx context.Context, key string, opts ...LoadOption) (str
 }
 
 // LoadWithPrefix returns all the keys and values with the given key prefix.
+//
+// The prefix can span multiple etcd Range pages. A single unbounded Get either
+// returns every matching key at once or fails with ResourceExhausted when the
+// response exceeds the transport message size budget (etcd server send cap /
+// gRPC recv limit) — it never silently truncates. Loop over Limit-bounded
+// pages so callers always receive the complete, sorted listing.
 func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string, opts ...LoadOption) ([]string, []string, error) {
 	opt := defaultLoadOption()
 	for _, f := range opts {
 		f(opt)
 	}
 	key = joinPath(kv.rootPath, key)
+	// Keep the original range end; pagination only advances the start key.
+	// WithSort + WithLimit is honored by etcd (fetch all, sort, then truncate
+	// to Limit and set More), so each page is bounded in size.
 	options := []clientv3.OpOption{
-		clientv3.WithPrefix(),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(key)),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(etcdLoadWithPrefixPageSize),
 	}
 	options = append(options, opt.EtcdOptions()...)
-	resp, err := kv.client.Get(ctx, key, options...)
-	if err != nil {
-		return nil, nil, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
+
+	var keys, values []string
+	next := key
+	for {
+		resp, err := kv.client.Get(ctx, next, options...)
+		if err != nil {
+			return nil, nil, err
+		}
+		if keys == nil {
+			// Count is the total number of matching keys in the range even
+			// when the first page is bounded, so it is a safe preallocation
+			// hint across all pages.
+			keys = make([]string, 0, resp.Count)
+			values = make([]string, 0, resp.Count)
+		}
+		for _, item := range resp.Kvs {
+			keys = append(keys, string(item.Key))
+			values = append(values, string(item.Value))
+		}
+		if !resp.More {
+			break
+		}
+		if len(resp.Kvs) == 0 {
+			return nil, nil, fmt.Errorf("etcd LoadWithPrefix: More set but empty page at %q", next)
+		}
+		// '\x00' is the immediate lexicographic successor of the last key; the
+		// next page starts right after it and stays inside the range.
+		next = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
 	}
 	return keys, values, nil
 }
