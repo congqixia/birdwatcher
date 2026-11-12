@@ -62,7 +62,17 @@ func TestEtcdLoadWithPrefixPagination(t *testing.T) {
 		require.Empty(t, v)
 	}
 
-	// 3) Empty prefix: empty result, no error.
+	// 3) Empty prefix: full keyspace listing — etcd rejects an empty range
+	// start key, so the empty-prefix scan must start at "\x00" instead.
+	keys, values, err = kv.LoadWithPrefix(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, keys, total)
+	for i := 0; i < total; i++ {
+		require.Equal(t, fmt.Sprintf("prefix/k%04d", i), keys[i])
+		require.Equal(t, strings.Repeat("v", 128), values[i])
+	}
+
+	// 4) Unmatched prefix: empty result, no error.
 	keys, values, err = kv.LoadWithPrefix(ctx, "does-not-exist")
 	require.NoError(t, err)
 	require.Empty(t, keys)

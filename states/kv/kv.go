@@ -126,6 +126,10 @@ func (kv *etcdKV) Load(ctx context.Context, key string, opts ...LoadOption) (str
 // response exceeds the transport message size budget (etcd server send cap /
 // gRPC recv limit) — it never silently truncates. Loop over Limit-bounded
 // pages so callers always receive the complete, sorted listing.
+//
+// An empty prefix scans the whole keyspace, matching the old WithPrefix()
+// translation: etcd treats "\x00" as the keyspace-low start key and a "\x00"
+// range end as "to the end of the keyspace".
 func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string, opts ...LoadOption) ([]string, []string, error) {
 	opt := defaultLoadOption()
 	for _, f := range opts {
@@ -143,11 +147,26 @@ func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string, opts ...LoadOp
 	options = append(options, opt.EtcdOptions()...)
 
 	var keys, values []string
+	// etcd rejects a range with an empty start key. For an empty prefix, start
+	// at "\x00" (the keyspace low) so the range covers every key.
 	next := key
+	if next == "" {
+		next = "\x00"
+	}
+	// rev pins every page to the first page's revision so the combined listing
+	// reflects a single snapshot, like the original single unbounded Range did.
+	var rev int64
 	for {
-		resp, err := kv.client.Get(ctx, next, options...)
+		opts := options
+		if rev != 0 {
+			opts = append(opts, clientv3.WithRev(rev))
+		}
+		resp, err := kv.client.Get(ctx, next, opts...)
 		if err != nil {
 			return nil, nil, err
+		}
+		if rev == 0 {
+			rev = resp.Header.Revision
 		}
 		if keys == nil {
 			// Count is the total number of matching keys in the range even
