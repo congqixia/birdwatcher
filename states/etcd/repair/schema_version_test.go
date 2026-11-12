@@ -80,8 +80,8 @@ func seedSchemaVersionTestKV(t *testing.T) *fakeMetaKV {
 
 	// unrelated collection meta (db path), must not be touched.
 	noise := &etcdpb.CollectionInfo{
-		ID:    2,
-		DbId:  7,
+		ID:   2,
+		DbId: 7,
 		Schema: &schemapb.CollectionSchema{
 			Name:    "coll_2",
 			Version: 9,
@@ -257,8 +257,8 @@ func TestSchemaVersionCommand(t *testing.T) {
 	t.Run("repairs collection meta stored in db path", func(t *testing.T) {
 		cli := &fakeMetaKV{data: map[string]string{}}
 		coll := &etcdpb.CollectionInfo{
-			ID:    3,
-			DbId:  7,
+			ID:   3,
+			DbId: 7,
 			Schema: &schemapb.CollectionSchema{
 				Name:    "coll_3",
 				Version: 2,
