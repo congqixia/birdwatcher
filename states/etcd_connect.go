@@ -200,7 +200,7 @@ type ConnectParams struct {
 	ETCDPem             string `name:"etcdCert" default:"" desc:"etcd tls cert file path"`
 	ETCDKey             string `name:"etcdKey" default:"" desc:"etcd tls key file path"`
 	ETCDUserName        string `name:"etcdUserName" default:"" desc:"etcd credential username"`
-	ETCDPassword        string `name:"etcdPassword" default:"" desc:"etcd creidentail password"`
+	ETCDPassword        string `name:"etcdPassword" default:"" desc:"etcd creidentail password" secret:"true"`
 	TLSMinVersion       string `name:"min_version" default:"1.2" desc:"TLS min version"`
 	// TiKV Params
 	UseTiKV       bool   `name:"use_tikv" default:"false" desc:"enable to use tikv for metastore"`

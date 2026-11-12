@@ -128,8 +128,8 @@ type ConnectOSSParam struct {
 	RootPath            string `name:"rootPath" default:""`
 	UseIAM              bool   `name:"iam" default:"false" desc:"use IAM mode"`
 	IAMEndpoint         string `name:"iamEndpoint" default:"" desc:"IAM endpoint address"`
-	AK                  string `name:"ak" default:"" desc:"access key/username"`
-	SK                  string `name:"sk" default:"" desc:"secret key/password"`
+	AK                  string `name:"ak" default:"" desc:"access key/username" secret:"true"`
+	SK                  string `name:"sk" default:"" desc:"secret key/password" secret:"true"`
 	UseSSL              bool   `name:"ssl" default:"" desc:"use SSL"`
 	SkipBucketCheck     bool   `name:"skipBucketCheck" default:"true"`
 }

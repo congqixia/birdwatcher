@@ -1,14 +1,17 @@
 package states
 
 import (
+	"context"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/birdwatcher/configs"
 	"github.com/milvus-io/birdwatcher/framework"
 	metakv "github.com/milvus-io/birdwatcher/states/kv"
+	"github.com/milvus-io/birdwatcher/states/storage"
 )
 
 func TestGetKVConnectedStateReturnsMetastoreState(t *testing.T) {
@@ -64,4 +67,42 @@ func TestConnectParamsRootPathProvided(t *testing.T) {
 		cp := &ConnectParams{}
 		require.False(t, cp.rootPathProvided())
 	})
+}
+
+type connectFlagReceiver struct{}
+
+func (r *connectFlagReceiver) ConnectCommand(_ context.Context, _ *ConnectParams) error {
+	return nil
+}
+
+func TestConnectCommandRedactsEtcdPassword(t *testing.T) {
+	host := &struct{ *framework.CmdState }{framework.NewCmdState("test", &configs.Config{})}
+	root := &cobra.Command{}
+	host.MergeFunctionCommandsFrom(root, host, &connectFlagReceiver{})
+
+	require.Equal(t,
+		"connect --etcd 127.0.0.1:2379 --etcdUserName root --etcdPassword [REDACTED]",
+		framework.RedactCommand("connect --etcd 127.0.0.1:2379 --etcdUserName root --etcdPassword s3cret"))
+	require.Equal(t,
+		"connect --etcdPassword=[REDACTED]",
+		framework.RedactCommand("connect --etcdPassword=s3cret"))
+}
+
+type connectOSSFlagReceiver struct{}
+
+func (r *connectOSSFlagReceiver) ConnectMinioCommand(_ context.Context, _ *storage.ConnectOSSParam) error {
+	return nil
+}
+
+func TestConnectOSSCommandRedactsKeys(t *testing.T) {
+	host := &struct{ *framework.CmdState }{framework.NewCmdState("test", &configs.Config{})}
+	root := &cobra.Command{}
+	host.MergeFunctionCommandsFrom(root, host, &connectOSSFlagReceiver{})
+
+	require.Equal(t,
+		"connect oss --bucket a-bucket --ak [REDACTED] --sk [REDACTED]",
+		framework.RedactCommand("connect oss --bucket a-bucket --ak minioadmin --sk s3cret"))
+	require.Equal(t,
+		"connect oss --ak=[REDACTED] --sk=[REDACTED]",
+		framework.RedactCommand("connect oss --ak=minioadmin --sk=s3cret"))
 }
