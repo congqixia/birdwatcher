@@ -95,7 +95,7 @@ type Collections struct {
 }
 
 func (rs *Collections) TableHeaders() table.Row {
-	return table.Row{"ID", "Name", "DBID", "State", "Fields", "Channels"}
+	return table.Row{"ID", "Name", "DBID", "State", "Fields", "Channels", "SchemaVersion"}
 }
 
 func (rs *Collections) TableRows() []table.Row {
@@ -106,6 +106,7 @@ func (rs *Collections) TableRows() []table.Row {
 			proto.ID, proto.Schema.Name, proto.DbId,
 			proto.State.String(), len(proto.Schema.Fields),
 			len(coll.Channels()),
+			proto.Schema.Version,
 		})
 	}
 	return rows

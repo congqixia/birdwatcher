@@ -48,7 +48,7 @@ func (c *ComponentShow) WalRecoveryStorageCommand(ctx context.Context, p *WALRec
 		types.NewPChannelInfoFromProto(metas.Channel.Channel).String(),
 		formatStreamingNode(nodeInfo, sessionMap),
 		common.FormatWALCheckpoint(p.WALName, metas.Checkpoints)))
-	t.AppendHeader(table.Row{"Channel", "Partition Count", "Segment Count", "Segments", "SchemaVersion"})
+	t.AppendHeader(table.Row{"Channel", "Partition Count", "Segment Count", "Segments", "Schemas"})
 	for _, meta := range metas.VChannels {
 		if !strings.HasPrefix(meta.Vchannel, p.Channel) {
 			continue

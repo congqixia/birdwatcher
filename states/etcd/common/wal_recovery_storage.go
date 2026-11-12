@@ -90,7 +90,7 @@ func FormatSegmentAssignmentMeta(segment *streamingpb.SegmentAssignmentMeta) str
 
 // FormatSchema format the schema.
 func FormatSchema(schema *streamingpb.CollectionSchemaOfVChannel) string {
-	return fmt.Sprintf("schema@%d", schema.CheckpointTimeTick)
+	return fmt.Sprintf("schema@%d v%d", schema.CheckpointTimeTick, schema.GetSchema().GetVersion())
 }
 
 // FormatWALCheckpoint format the wal checkpoint.
@@ -244,6 +244,20 @@ func SaveSchemaForVChannel(ctx context.Context, cli kv.MetaKV, basePath string, 
 	}
 
 	schemaPath := path.Join(basePath, walRecoveryStoragePrefix, pchannel, walRecoveryStorageDirectoryVChannel, vchannel.Vchannel, walRecoveryStorageDirectorySchema, strconv.FormatUint(schema.CheckpointTimeTick, 10))
+	schemaBytes, err := proto.Marshal(schema)
+	if err != nil {
+		return err
+	}
+	return cli.Save(ctx, schemaPath, string(schemaBytes))
+}
+
+// UpdateSchemaForVChannel overwrites the schema meta of a vchannel in place,
+// keeping the original checkpoint time tick key. Unlike SaveSchemaForVChannel
+// it does not refuse keys that already exist, so it can be used to repair the
+// content of an existing schema snapshot (for example its schema version).
+func UpdateSchemaForVChannel(ctx context.Context, cli kv.MetaKV, basePath string, vchannel *streamingpb.VChannelMeta, schema *streamingpb.CollectionSchemaOfVChannel) error {
+	pchannel := funcutil.ToPhysicalChannel(vchannel.GetVchannel())
+	schemaPath := path.Join(basePath, walRecoveryStoragePrefix, pchannel, walRecoveryStorageDirectoryVChannel, vchannel.GetVchannel(), walRecoveryStorageDirectorySchema, strconv.FormatUint(schema.GetCheckpointTimeTick(), 10))
 	schemaBytes, err := proto.Marshal(schema)
 	if err != nil {
 		return err
