@@ -119,7 +119,9 @@ func ListCollectionsBy(ctx context.Context, cli kv.MetaKV, basePath string, sele
 	}
 
 	if len(results) > selector.enrichmentBulkThreshold() {
-		enrichCollectionsBulk(ctx, cli, basePath, results)
+		if err := enrichCollectionsBulk(ctx, cli, basePath, results); err != nil {
+			return nil, err
+		}
 	} else {
 		enrichCollectionsIndividually(ctx, cli, basePath, results)
 	}
@@ -135,15 +137,24 @@ func enrichCollectionsIndividually(ctx context.Context, cli kv.MetaKV, basePath 
 	}
 }
 
-func enrichCollectionsBulk(ctx context.Context, cli kv.MetaKV, basePath string, collections []*models.Collection) {
+func enrichCollectionsBulk(ctx context.Context, cli kv.MetaKV, basePath string, collections []*models.Collection) error {
 	wanted := make(map[int64]struct{}, len(collections))
 	for _, collection := range collections {
 		wanted[collection.GetProto().GetID()] = struct{}{}
 	}
 
-	fields := listFieldSchemasByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, FieldMetaPrefix)), wanted)
-	structFields := listStructArrayFieldSchemasByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, StructArrayFieldMetaPrefix)), wanted)
-	functions := listFunctionsByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, FunctionMetaPrefix)), wanted)
+	fields, err := listFieldSchemasByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, FieldMetaPrefix)), wanted)
+	if err != nil {
+		return err
+	}
+	structFields, err := listStructArrayFieldSchemasByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, StructArrayFieldMetaPrefix)), wanted)
+	if err != nil {
+		return err
+	}
+	functions, err := listFunctionsByCollectionID(ctx, cli, ensureMetaPrefix(path.Join(basePath, FunctionMetaPrefix)), wanted)
+	if err != nil {
+		return err
+	}
 
 	for _, collection := range collections {
 		collectionID := collection.GetProto().GetID()
@@ -151,6 +162,7 @@ func enrichCollectionsBulk(ctx context.Context, cli kv.MetaKV, basePath string, 
 		collection.GetProto().GetSchema().StructArrayFields = structFields[collectionID]
 		collection.Functions = functions[collectionID]
 	}
+	return nil
 }
 
 func ListCollectionWithoutFields(ctx context.Context, cli kv.MetaKV, basePath string, filters ...func(*models.Collection) bool) ([]*models.Collection, error) {
@@ -201,10 +213,13 @@ func getCollectionStructFields(ctx context.Context, cli kv.MetaKV, basePath stri
 	return fields, err
 }
 
-func listFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) map[int64][]*schemapb.FieldSchema {
+func listFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) (map[int64][]*schemapb.FieldSchema, error) {
 	keys, vals, err := cli.LoadWithPrefix(ctx, prefix)
-	if err != nil || len(keys) != len(vals) {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) != len(vals) {
+		return nil, fmt.Errorf("listFieldSchemasByCollectionID: keys (%d) and values (%d) length mismatch", len(keys), len(vals))
 	}
 
 	fields := make(map[int64][]*schemapb.FieldSchema)
@@ -223,13 +238,16 @@ func listFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaKV, prefix s
 		}
 		fields[collectionID] = append(fields[collectionID], field)
 	}
-	return fields
+	return fields, nil
 }
 
-func listStructArrayFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) map[int64][]*schemapb.StructArrayFieldSchema {
+func listStructArrayFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) (map[int64][]*schemapb.StructArrayFieldSchema, error) {
 	keys, vals, err := cli.LoadWithPrefix(ctx, prefix)
-	if err != nil || len(keys) != len(vals) {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) != len(vals) {
+		return nil, fmt.Errorf("listStructArrayFieldSchemasByCollectionID: keys (%d) and values (%d) length mismatch", len(keys), len(vals))
 	}
 
 	fields := make(map[int64][]*schemapb.StructArrayFieldSchema)
@@ -248,13 +266,16 @@ func listStructArrayFieldSchemasByCollectionID(ctx context.Context, cli kv.MetaK
 		}
 		fields[collectionID] = append(fields[collectionID], field)
 	}
-	return fields
+	return fields, nil
 }
 
-func listFunctionsByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) map[int64][]*models.Function {
+func listFunctionsByCollectionID(ctx context.Context, cli kv.MetaKV, prefix string, wanted map[int64]struct{}) (map[int64][]*models.Function, error) {
 	keys, vals, err := cli.LoadWithPrefix(ctx, prefix)
-	if err != nil || len(keys) != len(vals) {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) != len(vals) {
+		return nil, fmt.Errorf("listFunctionsByCollectionID: keys (%d) and values (%d) length mismatch", len(keys), len(vals))
 	}
 
 	functions := make(map[int64][]*models.Function)
@@ -273,7 +294,7 @@ func listFunctionsByCollectionID(ctx context.Context, cli kv.MetaKV, prefix stri
 		}
 		functions[collectionID] = append(functions[collectionID], models.NewFunction(function, key))
 	}
-	return functions
+	return functions, nil
 }
 
 func FillFieldSchemaIfEmpty(cli kv.MetaKV, basePath string, collection *etcdpb.CollectionInfo) error {
