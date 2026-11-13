@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/birdwatcher/framework"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -39,6 +40,16 @@ func seedLoadFieldsTestKV(t *testing.T) *fakeMetaKV {
 		{FieldID: 1, Name: "Timestamp"},
 		{FieldID: 101, Name: "vec"},
 		{FieldID: 102, Name: "new_value", Nullable: true},
+		// fieldID 103 is configured with field.skipLoad=true and must be
+		// excluded from the backfilled LoadFields.
+		{FieldID: 103, Name: "lazy_value", TypeParams: []*commonpb.KeyValuePair{
+			{Key: "field.skipLoad", Value: "true"},
+		}},
+		// fieldID 104 has an unparseable skipLoad config; mirroring
+		// GetCollectionLoadFields, the config is ignored and the field loads.
+		{FieldID: 104, Name: "broken_value", TypeParams: []*commonpb.KeyValuePair{
+			{Key: "field.skipLoad", Value: "not-a-bool"},
+		}},
 	} {
 		cli.data[testBasePath+"/root-coord/fields/1/"+strconv.FormatInt(field.FieldID, 10)] = mustMarshal(t, field)
 	}
@@ -90,7 +101,9 @@ func loadCollectionLoadFields(t *testing.T, cli *fakeMetaKV, collectionID int64)
 
 func TestLoadFieldsCommand(t *testing.T) {
 	basePath := testBasePath
-	expected := []int64{100, 101, 102, 201, 202} // sorted, system column 1 excluded
+	// sorted; system column 1 excluded, skipLoad field 103 excluded, and
+	// field 104 kept because its unparseable skipLoad config is ignored.
+	expected := []int64{100, 101, 102, 104, 201, 202}
 
 	t.Run("dry run does not write", func(t *testing.T) {
 		cli := seedLoadFieldsTestKV(t)
