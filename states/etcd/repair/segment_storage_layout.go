@@ -27,7 +27,7 @@ const (
 type RepairSegmentStorageLayoutParam struct {
 	framework.ExecutionParam `use:"repair segment-storage-layout" desc:"repair segment storage version and FieldBinlog child fields"`
 	SegmentID                int64    `name:"segment" default:"0" desc:"segment id to repair"`
-	StorageVersion           int64    `name:"storageVersion" default:"-1" desc:"target storage version: 0 (preserve legacy field binlogs) or 2 (repair column groups)"`
+	StorageVersion           int64    `name:"storageVersion" default:"-1" desc:"target storage version: 0 (Growing or Flushed, preserve legacy field binlogs) or 2 (Flushed only, repair column groups)"`
 	ColumnGroups             []string `name:"columnGroup" desc:"required for version 2 only: complete mapping groupID:childID[:childID...]; repeat for every existing group"`
 	AllowUnknownFields       bool     `name:"allowUnknownFields" default:"false" desc:"for version 2, allow child field ids not present in the current collection schema"`
 }
@@ -79,7 +79,11 @@ func (c *ComponentRepair) RepairSegmentStorageLayoutCommand(ctx context.Context,
 		return fmt.Errorf("found %d segment records with id %d", len(segments), p.SegmentID)
 	}
 	segment := segments[0]
-	if segment.GetState() != commonpb.SegmentState_Flushed {
+	if p.StorageVersion == storageVersionV0 {
+		if segment.GetState() != commonpb.SegmentState_Flushed && segment.GetState() != commonpb.SegmentState_Growing {
+			return fmt.Errorf("segment %d state is %s, only Growing or Flushed segments can be repaired to storage version 0", segment.GetID(), segment.GetState())
+		}
+	} else if segment.GetState() != commonpb.SegmentState_Flushed {
 		return fmt.Errorf("segment %d state is %s, only Flushed segments can be repaired", segment.GetID(), segment.GetState())
 	}
 	if segment.GetManifestPath() != "" {

@@ -300,12 +300,17 @@ func TestRepairSegmentStorageLayoutV0(t *testing.T) {
 		alreadyV0     bool
 		embeddedOnly  bool
 		backupFailure bool
+		growing       bool
+		noBinlogs     bool
 	}{
 		{name: "dry run"},
 		{name: "run", run: true},
 		{name: "already v0", run: true, alreadyV0: true},
 		{name: "embedded binlogs only", run: true, embeddedOnly: true},
 		{name: "backup failure", run: true, backupFailure: true},
+		{name: "growing dry run", growing: true},
+		{name: "growing run", run: true, growing: true},
+		{name: "growing without binlogs", run: true, growing: true, noBinlogs: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			field := &datapb.FieldBinlog{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 123, EntriesNum: 10}}}
@@ -317,12 +322,19 @@ func TestRepairSegmentStorageLayoutV0(t *testing.T) {
 			if test.alreadyV0 {
 				segment.StorageVersion = 0
 			}
+			if test.growing {
+				segment.State = commonpb.SegmentState_Growing
+			}
+			if test.noBinlogs {
+				segment.Binlogs = nil
+				segment.NumOfRows = 0
+			}
 			originalSegment := mustMarshal(t, segment)
 			originalField := mustMarshal(t, field)
 			cli := &segmentStorageLayoutKV{data: map[string]string{
 				segKey: originalSegment, "unrelated": "keep",
 			}}
-			if !test.embeddedOnly {
+			if !test.embeddedOnly && !test.noBinlogs {
 				cli.data[fieldKey] = originalField
 			}
 			if test.backupFailure {
@@ -361,7 +373,7 @@ func TestRepairSegmentStorageLayoutV0(t *testing.T) {
 				require.NoError(t, component.RepairSegmentStorageLayoutCommand(context.Background(), param))
 				require.Len(t, cli.multiSaveKeys, 2)
 			}
-			if !test.embeddedOnly {
+			if !test.embeddedOnly && !test.noBinlogs {
 				require.Equal(t, originalField, cli.data[fieldKey])
 			}
 			require.Equal(t, "keep", cli.data["unrelated"])
@@ -378,7 +390,10 @@ func TestRepairSegmentStorageLayoutV0RejectsIncompatibleMetadata(t *testing.T) {
 		wantErr string
 	}{
 		{name: "manifest", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Flushed, ManifestPath: "manifest.avro"}, wantErr: "has manifest path"},
-		{name: "growing", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Growing}, wantErr: "only Flushed"},
+		{name: "dropped", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Dropped}, wantErr: "only Growing or Flushed"},
+		{name: "sealed", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Sealed}, wantErr: "only Growing or Flushed"},
+		{name: "growing with manifest", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Growing, ManifestPath: "manifest.avro"}, wantErr: "has manifest path"},
+		{name: "growing with column group", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Growing}, field: &datapb.FieldBinlog{FieldID: 100, ChildFields: []int64{100}}, wantErr: "has child fields"},
 		{name: "standalone column group", field: &datapb.FieldBinlog{FieldID: 100, ChildFields: []int64{100, 101}}, wantErr: "has child fields"},
 		{name: "embedded column group", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Flushed, Binlogs: []*datapb.FieldBinlog{{FieldID: 100, ChildFields: []int64{100}}}}, wantErr: "embedded FieldBinlog"},
 		{name: "column group parameter", groups: []string{"100:100"}, wantErr: "only supported for storage version 2"},
@@ -426,4 +441,20 @@ func TestRepairSegmentStorageLayoutV0CommandFlags(t *testing.T) {
 	updated := &datapb.SegmentInfo{}
 	require.NoError(t, proto.Unmarshal([]byte(cli.data[segKey]), updated))
 	require.Zero(t, updated.GetStorageVersion())
+}
+
+func TestRepairSegmentStorageLayoutV2RejectsGrowing(t *testing.T) {
+	const segKey = "root/datacoord-meta/s/100/20/10"
+	original := mustMarshal(t, &datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 20, State: commonpb.SegmentState_Growing,
+		StorageVersion: 3,
+	})
+	cli := &segmentStorageLayoutKV{data: map[string]string{segKey: original}}
+	err := NewComponent(cli, nil, "root").RepairSegmentStorageLayoutCommand(context.Background(), &RepairSegmentStorageLayoutParam{
+		ExecutionParam: framework.ExecutionParam{Run: true}, SegmentID: 10,
+		StorageVersion: storageVersionV2, ColumnGroups: []string{"100:100"},
+	})
+	require.ErrorContains(t, err, "only Flushed")
+	require.Empty(t, cli.multiSaveKeys)
+	require.Equal(t, original, cli.data[segKey])
 }
