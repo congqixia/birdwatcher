@@ -19,14 +19,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
-const storageVersionV2 int64 = 2
+const (
+	storageVersionV0 int64 = 0
+	storageVersionV2 int64 = 2
+)
 
 type RepairSegmentStorageLayoutParam struct {
 	framework.ExecutionParam `use:"repair segment-storage-layout" desc:"repair segment storage version and FieldBinlog child fields"`
 	SegmentID                int64    `name:"segment" default:"0" desc:"segment id to repair"`
-	StorageVersion           int64    `name:"storageVersion" default:"-1" desc:"target storage version; currently only version 2 is supported"`
-	ColumnGroups             []string `name:"columnGroup" desc:"complete column-group mapping, format groupID:childID[:childID...]; repeat for every existing group"`
-	AllowUnknownFields       bool     `name:"allowUnknownFields" default:"false" desc:"allow child field ids not present in the current collection schema"`
+	StorageVersion           int64    `name:"storageVersion" default:"-1" desc:"target storage version: 0 (preserve legacy field binlogs) or 2 (repair column groups)"`
+	ColumnGroups             []string `name:"columnGroup" desc:"required for version 2 only: complete mapping groupID:childID[:childID...]; repeat for every existing group"`
+	AllowUnknownFields       bool     `name:"allowUnknownFields" default:"false" desc:"for version 2, allow child field ids not present in the current collection schema"`
 }
 
 type fieldBinlogRecord struct {
@@ -44,19 +47,25 @@ type segmentStorageLayoutChange struct {
 }
 
 // RepairSegmentStorageLayoutCommand repairs the metadata shape of an existing
-// storage-v2 segment. This command only changes metadata; callers must verify
-// the physical binlog format separately before executing it.
+// storage-v0 or storage-v2 segment. This command only changes metadata; callers
+// must verify the physical binlog format separately before executing it.
 func (c *ComponentRepair) RepairSegmentStorageLayoutCommand(ctx context.Context, p *RepairSegmentStorageLayoutParam) error {
 	if p.SegmentID <= 0 {
 		return fmt.Errorf("invalid segment id %d", p.SegmentID)
 	}
-	if p.StorageVersion != storageVersionV2 {
-		return fmt.Errorf("unsupported target storage version %d: segment-storage-layout currently only supports version 2", p.StorageVersion)
+	if p.StorageVersion != storageVersionV0 && p.StorageVersion != storageVersionV2 {
+		return fmt.Errorf("unsupported target storage version %d: segment-storage-layout only supports versions 0 and 2", p.StorageVersion)
 	}
 
-	columnGroups, err := parseColumnGroupMappings(p.ColumnGroups)
-	if err != nil {
-		return err
+	var columnGroups map[int64][]int64
+	if p.StorageVersion == storageVersionV2 {
+		var err error
+		columnGroups, err = parseColumnGroupMappings(p.ColumnGroups)
+		if err != nil {
+			return err
+		}
+	} else if len(p.ColumnGroups) > 0 || p.AllowUnknownFields {
+		return fmt.Errorf("--columnGroup and --allowUnknownFields are only supported for storage version 2")
 	}
 
 	segments, err := common.ListSegmentsBy(ctx, c.client, c.basePath, common.SegmentSelector{SegmentID: p.SegmentID})
@@ -74,7 +83,7 @@ func (c *ComponentRepair) RepairSegmentStorageLayoutCommand(ctx context.Context,
 		return fmt.Errorf("segment %d state is %s, only Flushed segments can be repaired", segment.GetID(), segment.GetState())
 	}
 	if segment.GetManifestPath() != "" {
-		return fmt.Errorf("segment %d has manifest path %q and cannot be converted to storage version 2", segment.GetID(), segment.GetManifestPath())
+		return fmt.Errorf("segment %d has manifest path %q and cannot be converted to storage version %d", segment.GetID(), segment.GetManifestPath(), p.StorageVersion)
 	}
 
 	segmentRaw, err := c.client.Load(ctx, segment.GetKey())
@@ -86,12 +95,15 @@ func (c *ComponentRepair) RepairSegmentStorageLayoutCommand(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	if p.StorageVersion == storageVersionV2 && len(fieldBinlogs) == 0 {
+		return fmt.Errorf("segment %d has no standalone FieldBinlog metadata", segment.GetID())
+	}
 
 	validFieldIDs := map[int64]struct{}{
 		0: {},
 		1: {},
 	}
-	if !p.AllowUnknownFields {
+	if p.StorageVersion == storageVersionV2 && !p.AllowUnknownFields {
 		collection, err := common.GetCollectionByIDVersion(ctx, c.client, c.basePath, segment.GetCollectionID())
 		if err != nil {
 			return fmt.Errorf("failed to load collection %d schema: %w", segment.GetCollectionID(), err)
@@ -143,9 +155,11 @@ func (c *ComponentRepair) RepairSegmentStorageLayoutCommand(ctx context.Context,
 	originalValues := make([]string, 0, len(fieldBinlogs)+1)
 	originalKeys = append(originalKeys, segment.GetKey())
 	originalValues = append(originalValues, segmentRaw)
-	for _, record := range fieldBinlogs {
-		originalKeys = append(originalKeys, record.key)
-		originalValues = append(originalValues, record.raw)
+	if len(change.fieldBinlogs) > 0 {
+		for _, record := range fieldBinlogs {
+			originalKeys = append(originalKeys, record.key)
+			originalValues = append(originalValues, record.raw)
+		}
 	}
 
 	backupRoot := path.Join(
@@ -186,10 +200,6 @@ func (c *ComponentRepair) loadSegmentFieldBinlogs(ctx context.Context, segment *
 	if len(keys) != len(values) {
 		return nil, fmt.Errorf("field binlog key/value count mismatch: %d keys, %d values", len(keys), len(values))
 	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("segment %d has no standalone FieldBinlog metadata under %s", segment.GetID(), prefix)
-	}
-
 	records := make([]fieldBinlogRecord, 0, len(keys))
 	for idx, key := range keys {
 		fieldBinlog := &datapb.FieldBinlog{}
@@ -291,6 +301,24 @@ func prepareSegmentStorageLayout(
 	validFieldIDs map[int64]struct{},
 	allowUnknownFields bool,
 ) (*segmentStorageLayoutChange, error) {
+	if targetStorageVersion == storageVersionV0 {
+		// V0 uses per-field binlogs. Do not rewrite binlogs or infer a legacy
+		// layout from column groups; the caller must verify the physical files.
+		for _, fieldBinlog := range segment.GetBinlogs() {
+			if len(fieldBinlog.GetChildFields()) > 0 {
+				return nil, fmt.Errorf("embedded FieldBinlog %d has child fields; cannot set storage version 0", fieldBinlog.GetFieldID())
+			}
+		}
+		for _, record := range fieldBinlogs {
+			if len(record.value.GetChildFields()) > 0 {
+				return nil, fmt.Errorf("FieldBinlog %d has child fields; cannot set storage version 0", record.value.GetFieldID())
+			}
+		}
+		segmentClone := proto.Clone(segment).(*datapb.SegmentInfo)
+		changed := segmentClone.GetStorageVersion() != storageVersionV0
+		segmentClone.StorageVersion = storageVersionV0
+		return &segmentStorageLayoutChange{segment: segmentClone, changed: changed}, nil
+	}
 	if len(fieldBinlogs) == 0 {
 		return nil, fmt.Errorf("no FieldBinlog records supplied")
 	}
