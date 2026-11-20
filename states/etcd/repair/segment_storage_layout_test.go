@@ -2,11 +2,13 @@ package repair
 
 import (
 	"context"
+	"errors"
 	"path"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -22,6 +24,7 @@ type segmentStorageLayoutKV struct {
 	data           map[string]string
 	multiSaveKeys  [][]string
 	multiSaveValue [][]string
+	multiSaveErr   error
 }
 
 func (s *segmentStorageLayoutKV) Load(ctx context.Context, key string, opts ...kv.LoadOption) (string, error) {
@@ -51,6 +54,9 @@ func (s *segmentStorageLayoutKV) LoadWithPrefix(ctx context.Context, prefix stri
 func (s *segmentStorageLayoutKV) MultiSave(ctx context.Context, keys, values []string) error {
 	s.multiSaveKeys = append(s.multiSaveKeys, append([]string(nil), keys...))
 	s.multiSaveValue = append(s.multiSaveValue, append([]string(nil), values...))
+	if s.multiSaveErr != nil {
+		return s.multiSaveErr
+	}
 	for idx, key := range keys {
 		s.data[key] = values[idx]
 	}
@@ -280,4 +286,175 @@ func TestRepairSegmentStorageLayoutCommandBacksUpAndUpdatesAtomically(t *testing
 	updatedField101 := &datapb.FieldBinlog{}
 	require.NoError(t, proto.Unmarshal([]byte(cli.data[field101Key]), updatedField101))
 	require.Equal(t, []int64{101}, updatedField101.GetChildFields())
+}
+
+func TestRepairSegmentStorageLayoutV0(t *testing.T) {
+	const (
+		basePath = "root/meta"
+		segKey   = basePath + "/datacoord-meta/s/100/20/10"
+		fieldKey = basePath + "/datacoord-meta/binlog/100/20/10/100"
+	)
+	for _, test := range []struct {
+		name          string
+		run           bool
+		alreadyV0     bool
+		embeddedOnly  bool
+		backupFailure bool
+		growing       bool
+		noBinlogs     bool
+	}{
+		{name: "dry run"},
+		{name: "run", run: true},
+		{name: "already v0", run: true, alreadyV0: true},
+		{name: "embedded binlogs only", run: true, embeddedOnly: true},
+		{name: "backup failure", run: true, backupFailure: true},
+		{name: "growing dry run", growing: true},
+		{name: "growing run", run: true, growing: true},
+		{name: "growing without binlogs", run: true, growing: true, noBinlogs: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			field := &datapb.FieldBinlog{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 123, EntriesNum: 10}}}
+			segment := &datapb.SegmentInfo{
+				ID: 10, CollectionID: 100, PartitionID: 20,
+				State: commonpb.SegmentState_Flushed, StorageVersion: 3, DataVersion: 7,
+				NumOfRows: 10, InsertChannel: "channel", Binlogs: []*datapb.FieldBinlog{field},
+			}
+			if test.alreadyV0 {
+				segment.StorageVersion = 0
+			}
+			if test.growing {
+				segment.State = commonpb.SegmentState_Growing
+			}
+			if test.noBinlogs {
+				segment.Binlogs = nil
+				segment.NumOfRows = 0
+			}
+			originalSegment := mustMarshal(t, segment)
+			originalField := mustMarshal(t, field)
+			cli := &segmentStorageLayoutKV{data: map[string]string{
+				segKey: originalSegment, "unrelated": "keep",
+			}}
+			if !test.embeddedOnly && !test.noBinlogs {
+				cli.data[fieldKey] = originalField
+			}
+			if test.backupFailure {
+				cli.multiSaveErr = errors.New("backup unavailable")
+			}
+			component := NewComponent(cli, nil, basePath)
+			param := &RepairSegmentStorageLayoutParam{
+				ExecutionParam: framework.ExecutionParam{Run: test.run}, SegmentID: 10, StorageVersion: 0,
+			}
+			err := component.RepairSegmentStorageLayoutCommand(context.Background(), param)
+			if test.backupFailure {
+				require.ErrorIs(t, err, cli.multiSaveErr)
+				require.Len(t, cli.multiSaveKeys, 1, "failed backup must prevent the update")
+			} else {
+				require.NoError(t, err)
+			}
+			if !test.run || test.alreadyV0 || test.backupFailure {
+				require.Equal(t, originalSegment, cli.data[segKey])
+				if !test.backupFailure {
+					require.Empty(t, cli.multiSaveKeys)
+				}
+			} else {
+				require.Len(t, cli.multiSaveKeys, 2)
+				require.Len(t, cli.multiSaveKeys[0], 1)
+				backupKey := cli.multiSaveKeys[0][0]
+				require.True(t, strings.HasPrefix(backupKey, "birdwatcher/backup/segment-storage-layout/"))
+				require.Equal(t, originalSegment, cli.data[backupKey])
+				require.Equal(t, []string{segKey}, cli.multiSaveKeys[1], "only the segment metadata should be updated")
+				updated := &datapb.SegmentInfo{}
+				require.NoError(t, proto.Unmarshal([]byte(cli.data[segKey]), updated))
+				expected := proto.Clone(segment).(*datapb.SegmentInfo)
+				expected.StorageVersion = 0
+				require.Equal(t, segment.GetDataVersion(), updated.GetDataVersion())
+				require.True(t, proto.Equal(expected, updated), "all other segment fields must be preserved")
+				// Repeating the repair must not write another backup or bump DataVersion.
+				require.NoError(t, component.RepairSegmentStorageLayoutCommand(context.Background(), param))
+				require.Len(t, cli.multiSaveKeys, 2)
+			}
+			if !test.embeddedOnly && !test.noBinlogs {
+				require.Equal(t, originalField, cli.data[fieldKey])
+			}
+			require.Equal(t, "keep", cli.data["unrelated"])
+		})
+	}
+}
+
+func TestRepairSegmentStorageLayoutV0RejectsIncompatibleMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		segment *datapb.SegmentInfo
+		field   *datapb.FieldBinlog
+		groups  []string
+		wantErr string
+	}{
+		{name: "manifest", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Flushed, ManifestPath: "manifest.avro"}, wantErr: "has manifest path"},
+		{name: "dropped", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Dropped}, wantErr: "only Growing or Flushed"},
+		{name: "sealed", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Sealed}, wantErr: "only Growing or Flushed"},
+		{name: "growing with manifest", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Growing, ManifestPath: "manifest.avro"}, wantErr: "has manifest path"},
+		{name: "growing with column group", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Growing}, field: &datapb.FieldBinlog{FieldID: 100, ChildFields: []int64{100}}, wantErr: "has child fields"},
+		{name: "standalone column group", field: &datapb.FieldBinlog{FieldID: 100, ChildFields: []int64{100, 101}}, wantErr: "has child fields"},
+		{name: "embedded column group", segment: &datapb.SegmentInfo{State: commonpb.SegmentState_Flushed, Binlogs: []*datapb.FieldBinlog{{FieldID: 100, ChildFields: []int64{100}}}}, wantErr: "embedded FieldBinlog"},
+		{name: "column group parameter", groups: []string{"100:100"}, wantErr: "only supported for storage version 2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			segment := test.segment
+			if segment == nil {
+				segment = &datapb.SegmentInfo{State: commonpb.SegmentState_Flushed}
+			}
+			segment.ID, segment.CollectionID, segment.PartitionID, segment.StorageVersion = 10, 100, 20, 3
+			const segKey = "root/datacoord-meta/s/100/20/10"
+			original := mustMarshal(t, segment)
+			cli := &segmentStorageLayoutKV{data: map[string]string{segKey: original}}
+			if test.field != nil {
+				cli.data["root/datacoord-meta/binlog/100/20/10/100"] = mustMarshal(t, test.field)
+			}
+			err := NewComponent(cli, nil, "root").RepairSegmentStorageLayoutCommand(context.Background(), &RepairSegmentStorageLayoutParam{
+				ExecutionParam: framework.ExecutionParam{Run: true}, SegmentID: 10, StorageVersion: 0, ColumnGroups: test.groups,
+			})
+			require.ErrorContains(t, err, test.wantErr)
+			require.Empty(t, cli.multiSaveKeys)
+			require.Equal(t, original, cli.data[segKey])
+		})
+	}
+}
+
+func TestRepairSegmentStorageLayoutV0CommandFlags(t *testing.T) {
+	const segKey = "root/datacoord-meta/s/100/20/10"
+	original := mustMarshal(t, &datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 20, State: commonpb.SegmentState_Flushed,
+		StorageVersion: 3, Level: datapb.SegmentLevel_L0,
+	})
+	cli := &segmentStorageLayoutKV{data: map[string]string{segKey: original}}
+	host := &struct{ *framework.CmdState }{CmdState: framework.NewCmdState("host", nil)}
+	root := &cobra.Command{SilenceUsage: true, SilenceErrors: true}
+	host.MergeFunctionCommandsFrom(root, host, NewComponent(cli, nil, "root"))
+
+	root.SetArgs([]string{"repair", "segment-storage-layout", "--segment", "10", "--run"})
+	require.NoError(t, root.Execute())
+	require.Empty(t, cli.multiSaveKeys, "omitting --storageVersion must not default to version 0")
+
+	root.SetArgs([]string{"repair", "segment-storage-layout", "--segment", "10", "--storageVersion", "0", "--run"})
+	require.NoError(t, root.Execute())
+	require.Len(t, cli.multiSaveKeys, 2)
+	updated := &datapb.SegmentInfo{}
+	require.NoError(t, proto.Unmarshal([]byte(cli.data[segKey]), updated))
+	require.Zero(t, updated.GetStorageVersion())
+}
+
+func TestRepairSegmentStorageLayoutV2RejectsGrowing(t *testing.T) {
+	const segKey = "root/datacoord-meta/s/100/20/10"
+	original := mustMarshal(t, &datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 20, State: commonpb.SegmentState_Growing,
+		StorageVersion: 3,
+	})
+	cli := &segmentStorageLayoutKV{data: map[string]string{segKey: original}}
+	err := NewComponent(cli, nil, "root").RepairSegmentStorageLayoutCommand(context.Background(), &RepairSegmentStorageLayoutParam{
+		ExecutionParam: framework.ExecutionParam{Run: true}, SegmentID: 10,
+		StorageVersion: storageVersionV2, ColumnGroups: []string{"100:100"},
+	})
+	require.ErrorContains(t, err, "only Flushed")
+	require.Empty(t, cli.multiSaveKeys)
+	require.Equal(t, original, cli.data[segKey])
 }

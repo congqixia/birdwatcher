@@ -27,6 +27,7 @@ func init() {
 	allCheckItems["LOADED_INDEX_MISSING"] = newLoadedIndexMissing()
 	allCheckItems["MIXED_BINLOGS"] = newMixedBinlogs()
 	allCheckItems["STORAGE_V1_BINLOG_SCHEMA_MISMATCH"] = newStorageV1BinlogSchemaMismatch()
+	allCheckItems["STORAGE_V3_MANIFEST_MISSING"] = newStorageV3ManifestMissing()
 	allCheckItems["GRANT_ALIAS_CHECK"] = newGrantAliasCheck()
 
 	defaultList = []string{
