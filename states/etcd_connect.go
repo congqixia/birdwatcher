@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/birdwatcher/configs"
 	"github.com/milvus-io/birdwatcher/framework"
+	"github.com/milvus-io/birdwatcher/internal/tikvclient"
 	"github.com/milvus-io/birdwatcher/states/kv"
 )
 
@@ -42,14 +43,20 @@ func PingMetaStore(ctx context.Context, cli kv.MetaKV, rootPath string, metaPath
 }
 
 func GetTiKVClient(cp *ConnectParams) (*txnkv.Client, error) {
-	if cp.TiKVUseSSL {
-		f := func(conf *config.Config) {
-			conf.Security = config.NewSecurity(cp.TiKVTLSCACert, cp.TiKVTLSCert, cp.TiKVTLSKey, []string{})
-		}
-		config.UpdateGlobal(f)
-		return txnkv.NewClient([]string{cp.TiKVAddr})
+	ctx, cancel, err := cp.tikvConnectContext(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	return txnkv.NewClient([]string{cp.TiKVAddr})
+	defer cancel()
+	return getTiKVClient(ctx, cp)
+}
+
+func getTiKVClient(ctx context.Context, cp *ConnectParams) (*txnkv.Client, error) {
+	var security config.Security
+	if cp.TiKVUseSSL {
+		security = config.NewSecurity(cp.TiKVTLSCACert, cp.TiKVTLSCert, cp.TiKVTLSKey, nil)
+	}
+	return tikvclient.New(ctx, cp.TiKVAddr, security)
 }
 
 func (app *ApplicationState) ConnectCommand(ctx context.Context, cp *ConnectParams) error {
@@ -60,28 +67,40 @@ func (app *ApplicationState) ConnectCommand(ctx context.Context, cp *ConnectPara
 }
 
 func (app *ApplicationState) connectTiKV(ctx context.Context, cp *ConnectParams) error {
-	tikvCli, err := GetTiKVClient(cp)
+	ctx, cancel, err := cp.tikvConnectContext(ctx)
 	if err != nil {
 		return err
 	}
+	defer cancel()
+	tikvCli, err := getTiKVClient(ctx, cp)
+	if err != nil {
+		return err
+	}
+	return app.finishTiKVConnect(ctx, cp, kv.NewTiKV(tikvCli))
+}
 
-	cli := kv.NewTiKV(tikvCli)
+func (app *ApplicationState) finishTiKVConnect(ctx context.Context, cp *ConnectParams, cli kv.MetaKV) error {
+	connected := false
+	defer func() {
+		if !connected {
+			cli.Close()
+		}
+	}()
 	kvState := getKVConnectedState(app.core, cli, cp.TiKVAddr, app.config, app.extensions, app.objectStoreProvider)
 	if !cp.Dry {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
-		err = PingMetaStore(ctx, cli, cp.RootPath, cp.MetaPath)
+		err := PingMetaStore(ctx, cli, cp.RootPath, cp.MetaPath)
 		if err != nil {
 			if errors.Is(err, ErrNotMilvsuRootPath) {
 				if !cp.Force {
-					cli.Close()
 					fmt.Printf("Connection established, but %s, please check your config or use Dry mode\n", err.Error())
 					return err
 				}
 			} else {
-				fmt.Println("cannot connect to tikv with addr:", cp.TiKVAddr, err.Error())
-				return err
+				return errors.Wrapf(err, "TiKV metadata read via PD %q for %q failed", cp.TiKVAddr, path.Join(cp.RootPath, cp.MetaPath, "session/id"))
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(err, "TiKV connection deadline reached")
 		}
 
 		fmt.Fprintln(os.Stderr, "Using meta path:", fmt.Sprintf("%s/%s/", cp.RootPath, metaPath))
@@ -89,10 +108,14 @@ func (app *ApplicationState) connectTiKV(ctx context.Context, cp *ConnectParams)
 		// use rootPath as instanceName
 		app.SetTagNext(tikvTag, GetInstanceState(app.core, cli, cp.RootPath, cp.MetaPath, kvState, app.config, app.extensions, app.objectStoreProvider))
 	} else {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(err, "TiKV connection deadline reached")
+		}
 		fmt.Fprintln(os.Stderr, "using dry mode, ignore rootPath and metaPath")
 		// rootPath empty fall back to metastore connected state
 		app.SetTagNext(tikvTag, kvState)
 	}
+	connected = true
 	return nil
 }
 
@@ -203,18 +226,32 @@ type ConnectParams struct {
 	ETCDPassword        string `name:"etcdPassword" default:"" desc:"etcd creidentail password" secret:"true"`
 	TLSMinVersion       string `name:"min_version" default:"1.2" desc:"TLS min version"`
 	// TiKV Params
-	UseTiKV       bool   `name:"use_tikv" default:"false" desc:"enable to use tikv for metastore"`
-	TiKVTLSCACert string `name:"tikvCACert" default:"" desc:"tikv root CA pem file path"`
-	TiKVTLSCert   string `name:"tikvCert" default:"" desc:"tikv tls cert file path"`
-	TiKVTLSKey    string `name:"tikvKey" default:"" desc:"tikv tls key file path"`
-	TiKVUseSSL    bool   `name:"tikv_use_ssl" default:"false" desc:"enable to use SSL for tikv"`
-	TiKVAddr      string `name:"tikv" default:"127.0.0.1:2389" desc:"the tikv endpoint to connect"`
+	UseTiKV            bool   `name:"use_tikv" default:"false" desc:"enable to use tikv for metastore"`
+	TiKVTLSCACert      string `name:"tikvCACert" default:"" desc:"tikv root CA pem file path"`
+	TiKVTLSCert        string `name:"tikvCert" default:"" desc:"tikv tls cert file path"`
+	TiKVTLSKey         string `name:"tikvKey" default:"" desc:"tikv tls key file path"`
+	TiKVUseSSL         bool   `name:"tikv_use_ssl" default:"false" desc:"enable to use SSL for tikv"`
+	TiKVAddr           string `name:"tikv" default:"127.0.0.1:2389" desc:"the PD endpoint to connect (requires --use_tikv)"`
+	TiKVConnectTimeout string `name:"tikvConnectTimeout" default:"5s" desc:"timeout for TiKV initialization and metadata check, e.g. 5s or 500ms"`
 
 	Auto bool `name:"auto" default:"false" desc:"auto detect rootPath if possible"`
 
 	// unexported runtime state
 	flagSet         *pflag.FlagSet
 	rootPathFromEnv bool
+}
+
+func (cp *ConnectParams) tikvConnectContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	value := cp.TiKVConnectTimeout
+	if value == "" {
+		value = "5s"
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		return nil, nil, errors.New("tikvConnectTimeout must be a positive duration, e.g. 5s or 500ms")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return ctx, cancel, nil
 }
 
 // SetFlagSet implements framework.FlagSetAware to keep the parsed flagset,

@@ -40,6 +40,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
+	github.com/tikv/pd/client v0.0.0-20260609141937-b01426f6b08b
 	github.com/x448/float16 v0.8.4
 	github.com/zilliztech/woodpecker v0.1.42
 	go.etcd.io/etcd/api/v3 v3.7.1
@@ -204,7 +205,6 @@ require (
 	github.com/tidwall/gjson v1.17.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	github.com/tikv/pd/client v0.0.0-20260609141937-b01426f6b08b // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect

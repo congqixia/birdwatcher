@@ -48,6 +48,21 @@ Using meta path: instanceName/meta/
 
 ```
 
+### connect to TiKV
+
+Use the PD client endpoint and enable the TiKV backend explicitly:
+
+```text
+connect --use_tikv --tikv 127.0.0.1:2379 --rootPath by-dev --tikvConnectTimeout 5s
+```
+
+`--tikvConnectTimeout` defaults to `5s` and covers client initialization and the
+initial metadata read. It accepts positive durations such as `500ms` or `10s`.
+PD initialization attempts each discovery step once; failures report the stage,
+endpoint, and underlying RPC error. `--dry` skips the metadata read but still
+initializes the client within the same timeout. The timeout does not apply to
+commands issued after connecting.
+
 ### inspect some meta
 
 
