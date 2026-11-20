@@ -704,3 +704,61 @@ func ResolveExternalObjectKey(location ExternalSourceLocation, externalFile stri
 	}
 	return path.Join(location.RootPath, trimmed), nil
 }
+
+// ResolveExternalObjectURI resolves a complete URI without applying RootPath.
+// Both bucket and endpoint URI forms may refer to the same configured store.
+// The minio scheme explicitly selects endpoint form when the host is ambiguous.
+func ResolveExternalObjectURI(location ExternalSourceLocation, raw string) (string, error) {
+	uri := strings.TrimSpace(raw)
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("external file requires a complete object URI")
+	}
+	if u.User != nil || u.ForceQuery || u.RawQuery != "" || strings.Contains(uri, "#") {
+		return "", fmt.Errorf("external object URI must not contain user info, a query, or a fragment")
+	}
+	endpoint := location.Address
+	if endpoint == "" && location.Form == LocationFormMilvus {
+		endpoint = location.Host
+	}
+	matchesEndpoint := u.Host == endpoint
+	matchesBucket := u.Host == location.Bucket
+	requireEndpoint := strings.EqualFold(u.Scheme, "minio") || !matchesBucket
+	if requireEndpoint && !matchesEndpoint {
+		return "", fmt.Errorf("external file host does not match the configured endpoint or bucket")
+	}
+	key := strings.TrimPrefix(u.EscapedPath(), "/")
+	ambiguous := false
+	if matchesEndpoint {
+		bucket, rest, _ := strings.Cut(key, "/")
+		bucket, err := url.PathUnescape(bucket)
+		bucketMatches := err == nil && bucket == location.Bucket
+		if requireEndpoint {
+			if !bucketMatches {
+				return "", fmt.Errorf("external file bucket does not match the configured bucket")
+			}
+			key = rest
+		} else {
+			ambiguous = bucketMatches && rest != ""
+		}
+	}
+	if key == "" {
+		return "", fmt.Errorf("external object URI does not include an object key")
+	}
+	key, err = url.PathUnescape(key)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(key, "/") || strings.Contains(key, "//") {
+		return "", fmt.Errorf("external object key must not contain a leading slash or repeated slashes")
+	}
+	for segment := range strings.SplitSeq(key, "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("external object key must not contain a '..' path segment")
+		}
+	}
+	if ambiguous {
+		return "", fmt.Errorf("ambiguous external object URI: both bucket and endpoint forms are valid; use minio://endpoint/bucket/key for endpoint form")
+	}
+	return key, nil
+}

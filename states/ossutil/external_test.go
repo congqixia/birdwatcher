@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/milvus-io/birdwatcher/models"
@@ -572,5 +573,95 @@ func TestParseExternalSpecCompatibilityValidation(t *testing.T) {
 	spec, err := ParseExternalSpecLoose(`{"format":"future-format","extfs":{"future_option":true}}`)
 	if err != nil || spec.Format != "future-format" || spec.Extfs["future_option"] != "true" {
 		t.Fatalf("loose parsing failed: %+v, %v", spec, err)
+	}
+}
+
+func TestResolveExternalObjectURI(t *testing.T) {
+	for _, form := range []LocationForm{LocationFormAWS, LocationFormMilvus} {
+		location := ExternalSourceLocation{
+			Form: form, Host: "warehouse", Address: "storage.example:9000",
+			Bucket: "warehouse", RootPath: "table/metadata/v18.json",
+		}
+		tests := []struct {
+			uri  string
+			want string
+		}{
+			{"s3://warehouse/table/data/part.parquet", "table/data/part.parquet"},
+			{"s3://storage.example:9000/warehouse/table/data/part.parquet", "table/data/part.parquet"},
+			{"s3://warehouse/ROOT_PATH/data.parquet", "ROOT_PATH/data.parquet"},
+			{"s3://warehouse/data/a%3Fb%23c%25.parquet", "data/a?b#c%.parquet"},
+			{"s3://warehouse/data/a%2Fb.parquet", "data/a/b.parquet"},
+			{"s3://warehouse/data/a..b.parquet", "data/a..b.parquet"},
+			{"s3://warehouse//data/part.parquet", ""},
+			{"s3://warehouse/data//part.parquet", ""},
+			{"s3://warehouse/data/../part.parquet", ""},
+			{"s3://warehouse/data/%2Fpart.parquet", ""},
+			{"s3://storage.example:9000/warehouse/data/%2e%2e/part.parquet", ""},
+			{"data/part.parquet", ""},
+			{"ROOT_PATH/part.parquet", ""},
+			{"//warehouse/data/part.parquet", ""},
+			{"s3:///data/part.parquet", ""},
+			{"s3://other/part.parquet", ""},
+			{"s3://storage.example:9000/other/part.parquet", ""},
+			{"s3://storage.example:9000/warehouse%2Fpart.parquet", ""},
+			{"s3://warehouse/", ""},
+			{"s3://storage.example:9000/warehouse/", ""},
+			{"s3://warehouse/a%zz", ""},
+			{"s3://warehouse/a?versionId=old", ""},
+			{"s3://warehouse/a?", ""},
+			{"s3://warehouse/a#fragment", ""},
+			{"s3://warehouse/a#", ""},
+			{"s3://user:secret@warehouse/a", ""},
+		}
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%v/%s", form, tt.uri), func(t *testing.T) {
+				got, err := ResolveExternalObjectURI(location, tt.uri)
+				if tt.want == "" {
+					if err == nil {
+						t.Fatalf("expected URI validation error, got %q", got)
+					}
+					return
+				}
+				if err != nil || got != tt.want {
+					t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+				}
+			})
+		}
+	}
+}
+
+func TestResolveExternalObjectURIAmbiguousHost(t *testing.T) {
+	for _, form := range []LocationForm{LocationFormAWS, LocationFormMilvus} {
+		location := ExternalSourceLocation{Form: form, Host: "minio", Address: "minio", Bucket: "minio"}
+		for _, uri := range []string{"s3://minio/minio/data.parquet", "s3://minio/%6Dinio/data.parquet"} {
+			if _, err := ResolveExternalObjectURI(location, uri); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+				t.Errorf("URI %q: got %v, want ambiguity error", uri, err)
+			}
+		}
+		for _, tt := range []struct {
+			uri  string
+			want string
+		}{
+			{"s3://minio/data.parquet", "data.parquet"},
+			{"s3://minio/minio", "minio"},
+			{"s3://minio/minio/", "minio/"},
+			{"s3://minio/minio%2Fdata.parquet", "minio/data.parquet"},
+		} {
+			key, err := ResolveExternalObjectURI(location, tt.uri)
+			if err != nil || key != tt.want {
+				t.Errorf("URI %q: got %q, %v; want %q", tt.uri, key, err, tt.want)
+			}
+		}
+		key, err := ResolveExternalObjectURI(location, "minio://minio/minio/data.parquet")
+		if err != nil || key != "data.parquet" {
+			t.Errorf("explicit endpoint URI: got %q, %v", key, err)
+		}
+		if _, err := ResolveExternalObjectURI(location, "minio://minio/other/data.parquet"); err == nil {
+			t.Error("explicit endpoint URI must validate the bucket")
+		}
+	}
+	location := ExternalSourceLocation{Form: LocationFormAWS, Host: "bucket", Address: "endpoint", Bucket: "bucket"}
+	if _, err := ResolveExternalObjectURI(location, "minio://bucket/data.parquet"); err == nil {
+		t.Error("minio scheme requires an endpoint host even when it matches the bucket")
 	}
 }

@@ -24,7 +24,9 @@ import (
 	"github.com/milvus-io/birdwatcher/states/ossutil"
 	binlogv1 "github.com/milvus-io/birdwatcher/storage/binlog/v1"
 	storagecommon "github.com/milvus-io/birdwatcher/storage/common"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type InspectParquetParam struct {
@@ -42,7 +44,7 @@ type InspectParquetParam struct {
 	External            bool   `name:"external" default:"false" desc:"inspect parquet from external collection storage"`
 	CollectionID        int64  `name:"collection" default:"0" desc:"collection ID for external collection mode"`
 	ManifestSegmentID   int64  `name:"manifestSegment" default:"0" desc:"segment ID whose manifest files should be inspected in external mode"`
-	ExternalFile        string `name:"externalFile" default:"" desc:"single parquet object path to inspect in external mode"`
+	ExternalFile        string `name:"externalFile" default:"" desc:"single parquet object path (Iceberg requires a complete URI)"`
 }
 
 const inspectAutoStorageVersion int64 = -1 << 63
@@ -241,11 +243,11 @@ func (s *InstanceState) inspectExternalCollectionParquet(ctx context.Context, p 
 		return errors.Newf("collection %d does not have external source", p.CollectionID)
 	}
 
-	spec, err := parseExternalSpec(proto.GetSchema().GetExternalSpec())
+	spec, err := ossutil.ParseExternalSpecLoose(proto.GetSchema().GetExternalSpec())
 	if err != nil {
 		return err
 	}
-	if spec.Format != "" && spec.Format != externalspec.FormatParquet {
+	if spec.Format != "" && spec.Format != externalspec.FormatParquet && spec.Format != externalspec.FormatIcebergTable {
 		return errors.Newf("inspect-parquet does not support external format %s", spec.Format)
 	}
 	externalStore, externalBucketName, externalRootPath, location, err := newExternalObjectStore(ctx, proto.GetSchema().GetExternalSource(), spec, p.SkipBucketCheck)
@@ -257,8 +259,16 @@ func (s *InstanceState) inspectExternalCollectionParquet(ctx context.Context, p 
 	fmt.Printf("External Source: %s\n", redactExternalVectorSource(proto.GetSchema().GetExternalSource()))
 	fmt.Printf("Resolved Provider=%s Region=%s Host=%s Bucket=%s RootPath=%s\n", spec.CloudProvider, spec.Region, location.Host, externalBucketName, externalRootPath)
 
+	if spec.Format == externalspec.FormatIcebergTable {
+		fmt.Println("Iceberg inspection reads physical Parquet files; deletes and fragment row ranges are not applied.")
+	}
 	if p.ExternalFile != "" {
-		objectKey, err := resolveExternalObjectKey(location, p.ExternalFile)
+		var objectKey string
+		if spec.Format == externalspec.FormatIcebergTable {
+			objectKey, err = ossutil.ResolveExternalObjectURI(toOSSUtilExternalSourceLocation(location), p.ExternalFile)
+		} else {
+			objectKey, err = resolveExternalObjectKey(location, p.ExternalFile)
+		}
 		if err != nil {
 			return err
 		}
@@ -296,10 +306,10 @@ func (s *InstanceState) inspectExternalManifestSegmentParquet(ctx context.Contex
 	}
 
 	fmt.Printf("Manifest Segment: %d\n", segment.GetID())
-	return inspectExternalManifestParquet(ctx, manifestStore, manifestRootPath, externalStore, location, segment, p)
+	return inspectExternalManifestParquet(ctx, manifestStore, manifestRootPath, externalStore, location, collection.GetProto().GetSchema(), segment, p)
 }
 
-func inspectExternalManifestParquet(ctx context.Context, manifestStore oss.ObjectStore, manifestRootPath string, externalStore oss.ObjectStore, location externalSourceLocation, segment *models.Segment, p *InspectParquetParam) error {
+func inspectExternalManifestParquet(ctx context.Context, manifestStore oss.ObjectStore, manifestRootPath string, externalStore oss.ObjectStore, location externalSourceLocation, schema *schemapb.CollectionSchema, segment *models.Segment, p *InspectParquetParam) error {
 	rawManifest := segment.GetManifestPath()
 	fmt.Printf("Manifest Raw: %s\n", rawManifest)
 
@@ -327,9 +337,21 @@ func inspectExternalManifestParquet(ctx context.Context, manifestStore oss.Objec
 		return errors.Wrap(err, "parse manifest")
 	}
 
-	fieldFilter := ""
+	fieldColumn := ""
 	if p.FieldID != 0 {
-		fieldFilter = strconv.FormatInt(p.FieldID, 10)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		if err != nil {
+			return err
+		}
+		field, err := helper.GetFieldFromID(p.FieldID)
+		if err != nil {
+			return err
+		}
+		var stored bool
+		fieldColumn, stored = typeutil.NewStorageColumnResolver(schema).ManifestStoredColumnName(field)
+		if !stored {
+			return errors.Newf("field %d is not stored in the manifest", p.FieldID)
+		}
 	}
 
 	resolver := ossutil.NewManifestPathResolver(
@@ -339,25 +361,46 @@ func inspectExternalManifestParquet(ctx context.Context, manifestStore oss.Objec
 		toOSSUtilExternalSourceLocation(location),
 	)
 
+	pathResolutionFailures := 0
+	inspectionFailures := 0
+	matchedGroups := 0
 	for i, cg := range m.ColumnGroups {
-		if fieldFilter != "" && !slices.Contains(cg.Columns, fieldFilter) {
+		if p.FieldID != 0 && !slices.Contains(cg.Columns, fieldColumn) {
 			continue
 		}
+		matchedGroups++
 		fmt.Printf("\n===== Column Group #%d | columns=%v format=%s =====\n", i, cg.Columns, cg.Format)
 		for _, f := range cg.Files {
-			store, filePath, backend, err := resolver.Resolve(f.Path, "_data")
+			var store oss.ObjectStore
+			var filePath string
+			var backend ossutil.FileBackend
+			var err error
+			if cg.Format == externalspec.FormatIcebergTable {
+				filePath, err = ossutil.ResolveExternalObjectURI(toOSSUtilExternalSourceLocation(location), f.Path)
+				store, backend = externalStore, ossutil.FileBackendExternal
+			} else {
+				store, filePath, backend, err = resolver.Resolve(f.Path, "_data")
+			}
 			if err != nil {
 				fmt.Printf("failed to resolve manifest file path %s: %s\n",
 					redactExternalVectorObjectKey(f.Path),
 					sanitizeExternalVectorInspectionError(err, f.Path),
 				)
+				pathResolutionFailures++
 				continue
 			}
-			fmt.Printf("\n----- File %s (rows: [%d, %d)) backend=%s -----\n", filePath, f.StartIndex, f.EndIndex, backend)
+			fmt.Printf("\n----- File %s (fragment rows: [%d, %d)) backend=%s -----\n", filePath, f.StartIndex, f.EndIndex, backend)
 			if err := inspectRemoteParquetObject(ctx, store, filePath, p.MetadataOnly, p.SampleRows, p.ShowRowGroups); err != nil {
-				fmt.Printf("failed to inspect %s: %s\n", filePath, err.Error())
+				fmt.Printf("failed to inspect %s: %s\n", redactExternalVectorObjectKey(filePath), sanitizeExternalVectorInspectionError(err, filePath))
+				inspectionFailures++
 			}
 		}
+	}
+	if p.FieldID != 0 && matchedGroups == 0 {
+		return errors.Newf("field %d has no matching column group in the manifest", p.FieldID)
+	}
+	if pathResolutionFailures != 0 || inspectionFailures != 0 {
+		return errors.Newf("manifest file failures: %d path resolution, %d inspection", pathResolutionFailures, inspectionFailures)
 	}
 	return nil
 }
@@ -528,7 +571,7 @@ func printParquetFile(ctx context.Context, pqReader *file.Reader, name string, m
 func printParquetMetadata(pqReader *file.Reader, name string, showRowGroups bool) {
 	md := pqReader.MetaData()
 	fmt.Printf("--- Parquet metadata: %s ---\n", name)
-	fmt.Printf("NumRows: %d | NumRowGroups: %d\n", pqReader.NumRows(), pqReader.NumRowGroups())
+	fmt.Printf("Physical NumRows: %d | NumRowGroups: %d\n", pqReader.NumRows(), pqReader.NumRowGroups())
 	fmt.Printf("CreatedBy: %s | Version: %d\n", md.GetCreatedBy(), md.Version())
 
 	schema := md.Schema

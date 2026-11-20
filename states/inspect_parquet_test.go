@@ -4,14 +4,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/birdwatcher/models"
 	"github.com/milvus-io/birdwatcher/oss"
 	binlogv1 "github.com/milvus-io/birdwatcher/storage/binlog/v1"
 	storagecommon "github.com/milvus-io/birdwatcher/storage/common"
+	storagemanifest "github.com/milvus-io/birdwatcher/storage/manifest"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 )
 
 type closeTrackingReadSeeker struct {
@@ -777,6 +785,7 @@ func TestInspectExternalManifestParquetClosesManifestObject(t *testing.T) {
 		"root",
 		nil,
 		externalSourceLocation{},
+		nil,
 		segment,
 		&InspectParquetParam{},
 	)
@@ -785,5 +794,175 @@ func TestInspectExternalManifestParquetClosesManifestObject(t *testing.T) {
 	}
 	if !object.closed {
 		t.Fatal("inspectExternalManifestParquet() did not close the manifest object")
+	}
+}
+
+// TestInspectParquetExternalModes exercises the command with real manifest and
+// Parquet bytes. Only the object-store factory is replaced.
+func TestInspectParquetExternalModes(t *testing.T) {
+	for _, format := range []string{"", "parquet", "iceberg-table", "lance-table", "unknown"} {
+		for _, single := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/single=%t", format, single), func(t *testing.T) {
+				s, internalStore, segment := newScanCommandFixture(t)
+				client := s.client.(*scanFixtureKV)
+				spec := fmt.Sprintf(`{"format":%q}`, format)
+				data, err := proto.Marshal(&etcdpb.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+					Name: "external", ExternalSource: "s3://warehouse/table/metadata/v18.json", ExternalSpec: spec,
+				}})
+				require.NoError(t, err)
+				client.data["root/root-coord/collection/1"] = string(data)
+				field, err := proto.Marshal(&schemapb.FieldSchema{FieldID: 100, Name: "id", ExternalField: "source_id"})
+				require.NoError(t, err)
+				client.data["root/root-coord/fields/1/100"] = string(field)
+				// A source column may have the same name as a generated field.
+				generated, err := proto.Marshal(&schemapb.FieldSchema{
+					FieldID: 101, Name: "source_id", IsFunctionOutput: true,
+				})
+				require.NoError(t, err)
+				client.data["root/root-coord/fields/1/101"] = string(generated)
+				externalStore := &scanFixtureStore{data: map[string][]byte{
+					"table/data/part.parquet": scanFixtureParquet(t, []string{"source_id"}, [][]int64{{1}, {2}, {3}}),
+				}, opens: make(map[string]int), closes: make(map[string]int)}
+				location := externalSourceLocation{
+					Host: "storage.example", SourceHost: "warehouse", Bucket: "warehouse",
+					RootPath: "table/metadata/v18.json", HostIsBucket: true,
+				}
+				uri := "s3://storage.example/warehouse/table/data/part.parquet"
+				if format != "iceberg-table" {
+					location.RootPath = "table"
+					uri = "s3://warehouse/table/data/part.parquet"
+				}
+				patch := mockey.Mock(newExternalObjectStore).Return(externalStore, location.Bucket, location.RootPath, location, nil).Build()
+				defer patch.UnPatch()
+				internalStore.data["files/insert_log/1/2/20/_metadata/manifest-7.avro"] = scanFixtureManifest(t, &storagemanifest.Manifest{
+					ColumnGroups: []storagemanifest.ColumnGroup{
+						{Columns: []string{"source_id"}, Format: format, Files: []storagemanifest.ColumnGroupFile{{Path: uri, StartIndex: 1, EndIndex: 2}}},
+						{Columns: []string{"101"}, Format: "parquet", Files: []storagemanifest.ColumnGroupFile{{Path: "generated.parquet", EndIndex: 1}}},
+					},
+				})
+				internalStore.data["files/insert_log/1/2/20/_data/generated.parquet"] = scanFixtureParquet(t, []string{"101"}, [][]int64{{8}})
+				p := &InspectParquetParam{External: true, CollectionID: 1, MetadataOnly: true, ShowRowGroups: true}
+				if single {
+					p.ExternalFile = uri
+				} else {
+					p.ManifestSegmentID = segment.ID
+				}
+				output, err := captureScanOutput(t, func() error { return s.InspectParquetCommand(t.Context(), p) })
+				if format == "lance-table" || format == "unknown" {
+					require.Error(t, err)
+					require.Empty(t, externalStore.opens)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, 1, externalStore.opens["table/data/part.parquet"])
+				require.Contains(t, output, "Physical NumRows: 3")
+				require.Contains(t, output, "RowGroup 0:")
+				if format == "iceberg-table" {
+					require.Contains(t, output, "deletes and fragment row ranges are not applied")
+				}
+				if !single {
+					require.Equal(t, 1, internalStore.opens["files/insert_log/1/2/20/_data/generated.parquet"])
+					p.FieldID = 100
+					require.NoError(t, s.InspectParquetCommand(t.Context(), p))
+					require.Equal(t, 2, externalStore.opens["table/data/part.parquet"])
+					require.Equal(t, 1, internalStore.opens["files/insert_log/1/2/20/_data/generated.parquet"])
+				}
+				if !single {
+					p.FieldID = 101
+					require.NoError(t, s.InspectParquetCommand(t.Context(), p))
+					require.Equal(t, 2, externalStore.opens["table/data/part.parquet"], "generated field must not select the same-named source column")
+					require.Equal(t, 2, internalStore.opens["files/insert_log/1/2/20/_data/generated.parquet"])
+					p.FieldID = 999
+					require.Error(t, s.InspectParquetCommand(t.Context(), p))
+					p.FieldID = 0
+				}
+				if single && format == "iceberg-table" {
+					for _, invalid := range []string{"table/data/part.parquet", "s3://other/part.parquet", "s3://warehouse/"} {
+						p.ExternalFile = invalid
+						require.Error(t, s.InspectParquetCommand(t.Context(), p))
+					}
+					require.Equal(t, 1, externalStore.opens["table/data/part.parquet"])
+					p.ExternalFile = "s3://warehouse/table/data/part.parquet"
+					p.MetadataOnly = false
+					p.SampleRows = 1
+					require.NoError(t, s.InspectParquetCommand(t.Context(), p))
+				}
+				// A real footer parse failure must reach the command caller.
+				externalStore.data["table/data/part.parquet"] = []byte("invalid parquet")
+				require.Error(t, s.InspectParquetCommand(t.Context(), p))
+				if !single {
+					require.Equal(t, 3, internalStore.opens["files/insert_log/1/2/20/_data/generated.parquet"], "continue after an external file failure")
+					if format == "iceberg-table" {
+						internalStore.data["files/insert_log/1/2/20/_metadata/manifest-7.avro"] = scanFixtureManifest(t, &storagemanifest.Manifest{
+							ColumnGroups: []storagemanifest.ColumnGroup{
+								{Columns: []string{"source_id"}, Format: format, Files: []storagemanifest.ColumnGroupFile{
+									{Path: "s3://other/part.parquet"},
+									{Path: uri},
+								}},
+								{Columns: []string{"101"}, Format: "parquet", Files: []storagemanifest.ColumnGroupFile{{Path: "generated.parquet"}}},
+							},
+						})
+						opens := externalStore.opens["table/data/part.parquet"]
+						require.EqualError(t, s.InspectParquetCommand(t.Context(), p), "manifest file failures: 1 path resolution, 1 inspection")
+						require.Equal(t, opens+1, externalStore.opens["table/data/part.parquet"])
+						require.Equal(t, 4, internalStore.opens["files/insert_log/1/2/20/_data/generated.parquet"])
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestInspectParquetAmbiguousURI(t *testing.T) {
+	for _, single := range []bool{true, false} {
+		t.Run(fmt.Sprintf("single=%t", single), func(t *testing.T) {
+			s, internalStore, segment := newScanCommandFixture(t)
+			data, err := proto.Marshal(&etcdpb.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+				Name: "external", ExternalSource: "minio://minio/minio/table/metadata.json",
+				ExternalSpec: `{"format":"iceberg-table"}`,
+			}})
+			require.NoError(t, err)
+			s.client.(*scanFixtureKV).data["root/root-coord/collection/1"] = string(data)
+			externalStore := &scanFixtureStore{
+				data: map[string][]byte{
+					"data.parquet":       scanFixtureParquet(t, []string{"id"}, [][]int64{{1}}),
+					"minio/data.parquet": scanFixtureParquet(t, []string{"id"}, [][]int64{{2}, {3}}),
+				},
+				opens: make(map[string]int), closes: make(map[string]int),
+			}
+			location := externalSourceLocation{Host: "minio", SourceHost: "minio", Bucket: "minio", RootPath: "table/metadata.json"}
+			patch := mockey.Mock(newExternalObjectStore).Return(externalStore, "minio", location.RootPath, location, nil).Build()
+			defer patch.UnPatch()
+			inspect := func(uri string) (string, error) {
+				p := &InspectParquetParam{External: true, CollectionID: 1, MetadataOnly: true}
+				if single {
+					p.ExternalFile = uri
+				} else {
+					p.ManifestSegmentID = segment.ID
+					internalStore.data["files/insert_log/1/2/20/_metadata/manifest-7.avro"] = scanFixtureManifest(t, &storagemanifest.Manifest{
+						ColumnGroups: []storagemanifest.ColumnGroup{{
+							Columns: []string{"id"}, Format: "iceberg-table",
+							Files: []storagemanifest.ColumnGroupFile{{Path: uri, EndIndex: 1}},
+						}},
+					})
+				}
+				return captureScanOutput(t, func() error { return s.InspectParquetCommand(t.Context(), p) })
+			}
+			output, err := inspect("s3://minio/minio/data.parquet")
+			require.Error(t, err)
+			require.Contains(t, output+err.Error(), "ambiguous")
+			require.Empty(t, externalStore.opens)
+			output, err = inspect("minio://minio/minio/data.parquet")
+			require.NoError(t, err)
+			require.Contains(t, output, "Physical NumRows: 1")
+			require.Equal(t, 1, externalStore.opens["data.parquet"])
+			require.Zero(t, externalStore.opens["minio/data.parquet"])
+
+			output, err = inspect("s3://minio/data.parquet")
+			require.NoError(t, err)
+			require.Contains(t, output, "Physical NumRows: 1")
+			require.Equal(t, 2, externalStore.opens["data.parquet"])
+			require.Zero(t, externalStore.opens["minio/data.parquet"])
+		})
 	}
 }
